@@ -152,8 +152,11 @@ export function route(raw: string): Route {
   return { intent: "unknown", slots: {} };
 }
 
-/** Spoken help text, kept short for TTS. */
+/** Spoken help text, kept short for TTS. Covers every intent. */
 export const HELP_SPEECH =
-  "You can say: brief me. What's on my plate. Add task buy milk. " +
-  "Message Shy I'll be late. Any new messages. What's new — then next, snooze, or dismiss. " +
-  "Mute GitHub for today. Or unmute GitHub. Research electric cars.";
+  "Briefing: say brief me. " +
+  "Ascent: what's on my plate. Or add task buy milk to Groceries. " +
+  "Relay: message Shy I'll be late, then yes to send. Or any new messages. " +
+  "Switchboard: what's new — then next, snooze, dismiss, or stop. Mute GitHub for today, or unmute GitHub. " +
+  "Longview: research electric cars. Research status. What did you find on tariffs. " +
+  "And after a chime, ask what was that.";

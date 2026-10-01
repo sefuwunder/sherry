@@ -140,4 +140,30 @@ describe("router", () => {
   test("help speech is short", () => {
     expect(HELP_SPEECH.length).toBeLessThan(400);
   });
+
+  test("help speech mentions every intent", () => {
+    const help = HELP_SPEECH.toLowerCase();
+    const coverage: Record<string, string> = {
+      brief: "brief me",
+      myday: "what's on my plate",
+      add_task: "add task",
+      message: "message shy",
+      confirm: "yes to send",
+      cancel: "stop",
+      new_messages: "any new messages",
+      digest: "what's new",
+      triage_next: "next",
+      snooze: "snooze",
+      dismiss: "dismiss",
+      mute_channel: "mute github",
+      unmute_channel: "unmute github",
+      what_was_that: "what was that",
+      research_start: "research electric cars",
+      research_status: "research status",
+      research_findings: "what did you find",
+    };
+    for (const [intent, phrase] of Object.entries(coverage)) {
+      expect(help, `help missing ${intent}`).toContain(phrase);
+    }
+  });
 });
