@@ -20,10 +20,11 @@ if [ -x "$BIN" ]; then
 else
   ARCH="$(uname -m)"
   OS="$(uname -s)"
+  # NOTE: v1.2.0 renamed the assets (piper_amd64.tar.gz, not piper_linux_x86_64.tar.gz).
   if [ "$OS" = "Linux" ]; then
     case "$ARCH" in
-      x86_64)  ASSET="piper_linux_x86_64.tar.gz" ;;
-      aarch64) ASSET="piper_linux_aarch64.tar.gz" ;;
+      x86_64)  ASSET="piper_amd64.tar.gz" ;;
+      aarch64)  ASSET="piper_arm64.tar.gz" ;;
       *)       ASSET="" ;;
     esac
   else
