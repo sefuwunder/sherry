@@ -1,163 +1,145 @@
-/* sherry: voice-first desktop UI. Calm dark stage, terracotta accent,
-   big press-and-hold mic. Reduced-motion respected. */
+/* sherry: desktop widget. One attention orb, last exchange, collapsible input. */
 :root {
   --bg: #141210;
-  --panel: #1d1a17;
   --ink: #f2ece4;
   --muted: #a89e92;
+  --faint: #6f665c;
   --accent: #c96f4a;
-  --accent-soft: rgba(201, 111, 74, 0.16);
+  --amber: #e0a458;
   --line: #2c2823;
-  --ok: #7fb069;
-  --bad: #c0524a;
+  --panel: #1d1a17;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: radial-gradient(1200px 700px at 50% -10%, #221d18 0%, var(--bg) 60%);
+  background: radial-gradient(900px 600px at 50% -10%, #221d18 0%, var(--bg) 60%);
   color: var(--ink);
-  font: 16px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+  font: 15px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-}
-.shell {
-  max-width: 760px;
-  margin: 0 auto;
-  min-height: 100%;
   display: flex;
-  flex-direction: column;
-  padding: 20px 24px 28px;
+  align-items: flex-start;
+  justify-content: center;
 }
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
-}
-.brand { display: flex; align-items: center; gap: 10px; }
-.brand h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: 0.02em; }
-.brand-dot {
-  width: 12px; height: 12px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 12px rgba(201, 111, 74, 0.7);
-}
-.urgent-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: #e0a458;
-  box-shadow: 0 0 10px rgba(224, 164, 88, 0.9);
-  animation: urgent-pulse 1.6s ease-in-out infinite;
-}
-.urgent-dot[hidden] { display: none; }
-@keyframes urgent-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.45; transform: scale(0.8); }
-}
-.integrations { display: flex; gap: 8px; flex-wrap: wrap; }
-.chip {
-  font-size: 12px;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 3px 10px 3px 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--panel);
-}
-.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-.chip.on .dot { background: var(--ok); box-shadow: 0 0 6px rgba(127, 176, 105, 0.8); }
-.chip.on { color: var(--ink); }
-.chip.off .dot { background: var(--bad); }
-
-.stage {
+.widget {
+  width: 100%;
+  max-width: 400px;
+  padding: 36px 24px 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 44px 0 28px;
   text-align: center;
 }
-.mic {
+
+/* --- attention orb --- */
+.orb {
   position: relative;
-  width: 128px; height: 128px;
+  width: 104px;
+  height: 104px;
   border-radius: 50%;
   border: none;
   cursor: pointer;
-  color: #fff;
-  background: linear-gradient(145deg, #d67f57, #b25a36);
-  box-shadow: 0 8px 30px rgba(201, 111, 74, 0.35), inset 0 1px 0 rgba(255,255,255,0.25);
-  display: grid;
-  place-items: center;
-  transition: transform 0.12s ease;
+  background: radial-gradient(circle at 36% 30%, #e59a6c 0%, var(--accent) 55%, #9c4e2d 100%);
+  box-shadow:
+    0 0 26px rgba(201, 111, 74, 0.45),
+    0 0 70px rgba(201, 111, 74, 0.16),
+    inset 0 2px 6px rgba(255, 255, 255, 0.22),
+    inset 0 -6px 14px rgba(0, 0, 0, 0.28);
+  animation: breathe 4.5s ease-in-out infinite;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  transition: transform 0.12s ease;
 }
-.mic:active { transform: scale(0.96); }
-.mic .ring {
-  position: absolute; inset: -6px;
+.orb:active { transform: scale(0.95); }
+.orb .halo {
+  position: absolute;
+  inset: -8px;
   border-radius: 50%;
   border: 2px solid transparent;
   pointer-events: none;
 }
-.mic.listening .ring {
-  border-color: var(--accent);
-  animation: pulse 1.4s ease-out infinite;
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 26px rgba(201,111,74,0.45), 0 0 70px rgba(201,111,74,0.16), inset 0 2px 6px rgba(255,255,255,0.22), inset 0 -6px 14px rgba(0,0,0,0.28); }
+  50%      { box-shadow: 0 0 34px rgba(201,111,74,0.6), 0 0 90px rgba(201,111,74,0.22), inset 0 2px 6px rgba(255,255,255,0.22), inset 0 -6px 14px rgba(0,0,0,0.28); }
 }
-.mic.listening { background: linear-gradient(145deg, #e08a5f, #c05f36); }
-@keyframes pulse {
-  0% { transform: scale(0.98); opacity: 0.9; }
-  70% { transform: scale(1.12); opacity: 0; }
-  100% { transform: scale(1.12); opacity: 0; }
+/* listening: bright ring expanding outward */
+.orb.listening { animation: none; }
+.orb.listening .halo {
+  border-color: var(--accent);
+  animation: halo-pulse 1.4s ease-out infinite;
+}
+@keyframes halo-pulse {
+  0% { transform: scale(0.96); opacity: 0.9; }
+  70% { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+/* speaking: slow warm shimmer */
+.orb.speaking { animation: speak-shimmer 2.2s ease-in-out infinite; }
+@keyframes speak-shimmer {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.18); }
+}
+/* urgent: amber attention pulse (ask "what was that?") */
+.orb.urgent {
+  background: radial-gradient(circle at 36% 30%, #f0c078 0%, var(--amber) 55%, #b07a34 100%);
+  animation: urgent-pulse 1.6s ease-in-out infinite;
+}
+@keyframes urgent-pulse {
+  0%, 100% { box-shadow: 0 0 26px rgba(224,164,88,0.7), 0 0 70px rgba(224,164,88,0.25), inset 0 2px 6px rgba(255,255,255,0.22), inset 0 -6px 14px rgba(0,0,0,0.28); transform: scale(1); }
+  50% { box-shadow: 0 0 14px rgba(224,164,88,0.35), 0 0 40px rgba(224,164,88,0.12), inset 0 2px 6px rgba(255,255,255,0.22), inset 0 -6px 14px rgba(0,0,0,0.28); transform: scale(0.97); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mic.listening .ring { animation: none; border-color: var(--accent); }
+  .orb, .orb.urgent, .orb.speaking { animation: none; }
+  .orb.listening .halo { animation: none; border-color: var(--accent); }
 }
-.status { margin: 22px 0 6px; font-size: 17px; color: var(--ink); min-height: 26px; }
+
+/* --- status + exchange --- */
+.status {
+  margin: 18px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 20px;
+}
 .status kbd {
   font: inherit;
   border: 1px solid var(--line);
   border-bottom-width: 2px;
   border-radius: 6px;
-  padding: 0 7px;
+  padding: 0 6px;
   background: var(--panel);
+  font-size: 12px;
+}
+.exchange { width: 100%; margin: 14px 0 4px; min-height: 76px; }
+.heard {
+  margin: 0 0 8px;
   font-size: 14px;
+  color: var(--muted);
 }
-.hint { margin: 0; font-size: 13px; color: var(--muted); max-width: 560px; }
+.heard:empty::before { content: "—"; color: var(--faint); }
+.heard:not(:empty)::before { content: "“"; }
+.heard:not(:empty)::after { content: "”"; }
+.said { margin: 0; font-size: 15px; color: var(--ink); }
+.said:empty::before { content: "Sherry is listening."; color: var(--faint); font-size: 13px; }
 
-.logwrap { flex: 1; min-height: 120px; }
-.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
-.turn {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 12px 16px;
-}
-.turn .heard { color: var(--muted); font-size: 14px; margin: 0 0 6px; }
-.turn .heard::before { content: "“"; }
-.turn .heard::after { content: "”"; }
-.turn .said { margin: 0; font-size: 15px; }
-.turn .meta { font-size: 11px; color: var(--muted); margin-top: 8px; }
-
-.foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-  margin-top: 20px;
-}
-#stt-note { font-size: 12px; color: var(--muted); }
+/* --- collapsible text input --- */
 .ghost {
-  background: none; border: 1px solid var(--line); color: var(--muted);
-  border-radius: 999px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+  margin-top: 14px;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
 }
 .ghost:hover { color: var(--ink); border-color: var(--muted); }
-.textform { display: flex; gap: 8px; margin-top: 12px; }
+.ghost[aria-expanded="true"] { color: var(--ink); border-color: var(--accent); }
+.textform { display: flex; gap: 8px; margin-top: 10px; width: 100%; }
+.textform[hidden] { display: none; }
 .textform input {
   flex: 1;
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -166,7 +148,11 @@ body {
   font: inherit;
 }
 .textform button {
-  background: var(--accent); color: #fff; border: none;
-  border-radius: 10px; padding: 10px 20px; font: inherit; cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font: inherit;
+  cursor: pointer;
 }
-.textform[hidden] { display: none; }

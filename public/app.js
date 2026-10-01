@@ -1,9 +1,11 @@
-/* sherry client: push-to-talk capture (16kHz mono, VAD auto-stop),
-   WAV upload -> /api/hear, spoken replies via speechSynthesis. */
+/* sherry widget: attention orb + last exchange + collapsible text input.
+   Push-to-talk capture (16kHz mono, VAD auto-stop), WAV upload -> /api/hear,
+   spoken replies via the server's neural voice (browser voice fallback). */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const mic = $("mic"), statusEl = $("status"), logEl = $("log");
+const orb = $("orb"), statusEl = $("status");
+const heardEl = $("heard"), saidEl = $("said");
 const SILENCE_MS = 1200;      // auto-stop after this much quiet
 const MAX_MS = 30000;         // hard cap per utterance
 const RMS_QUIET = 0.015;      // below this counts as silence
@@ -36,6 +38,16 @@ let rec = null; // active recording state or null
 
 function setStatus(t) { statusEl.innerHTML = t; }
 
+function defaultPrompt() {
+  return 'Hold the orb — or hold <kbd>space</kbd> — and talk';
+}
+
+/** Show the latest exchange, replacing the previous one. */
+function showTurn(heard, said) {
+  heardEl.textContent = heard || "";
+  saidEl.textContent = said || "";
+}
+
 let currentAudio = null; // active neural-voice playback, for barge-in
 
 function stopAudio() {
@@ -44,6 +56,7 @@ function stopAudio() {
     currentAudio = null;
   }
   if ("speechSynthesis" in window) speechSynthesis.cancel();
+  orb.classList.remove("speaking");
 }
 
 function speakBrowser(text) {
@@ -54,8 +67,8 @@ function speakBrowser(text) {
   const pick = voices.find((v) => v.lang && v.lang.startsWith("en") && /natural|neural|samantha|google us english/i.test(v.name))
     || voices.find((v) => v.lang && v.lang.startsWith("en"));
   if (pick) u.voice = pick;
-  u.onstart = () => setStatus("Speaking… <span style='color:var(--muted);font-size:13px'>(hold the mic to interrupt)</span>");
-  u.onend = () => { if (!rec && !currentAudio) setStatus(defaultPrompt()); };
+  u.onstart = () => { orb.classList.add("speaking"); setStatus("Speaking… <span style='color:var(--muted);font-size:12px'>(hold the orb to interrupt)</span>"); };
+  u.onend = () => { orb.classList.remove("speaking"); if (!rec && !currentAudio) setStatus(defaultPrompt()); };
   speechSynthesis.speak(u);
 }
 if ("speechSynthesis" in window) speechSynthesis.getVoices();
@@ -74,17 +87,20 @@ async function speak(text) {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       currentAudio = audio;
-      audio.onended = () => {
+      const done = () => {
         URL.revokeObjectURL(url);
         if (currentAudio === audio) currentAudio = null;
+        orb.classList.remove("speaking");
         if (!rec) setStatus(defaultPrompt());
       };
+      audio.onended = done;
       audio.onerror = () => {
         URL.revokeObjectURL(url);
         if (currentAudio === audio) currentAudio = null;
         speakBrowser(text);
       };
-      setStatus("Speaking… <span style='color:var(--muted);font-size:13px'>(hold the mic to interrupt)</span>");
+      orb.classList.add("speaking");
+      setStatus("Speaking… <span style='color:var(--muted);font-size:12px'>(hold the orb to interrupt)</span>");
       try {
         await audio.play();
       } catch (e) {
@@ -97,30 +113,6 @@ async function speak(text) {
     }
   } catch (e) { /* server unreachable — fall through */ }
   speakBrowser(text);
-}
-
-function defaultPrompt() {
-  return 'Hold the mic — or hold <kbd>space</kbd> — and talk';
-}
-
-function addTurn(heard, said, intent) {
-  $("urgent-dot").hidden = true; // acknowledged by engaging
-  const li = document.createElement("li");
-  li.className = "turn";
-  const h = document.createElement("p");
-  h.className = "heard";
-  h.textContent = heard;
-  const s = document.createElement("p");
-  s.className = "said";
-  s.textContent = said;
-  li.append(h, s);
-  if (intent) {
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    meta.textContent = intent;
-    li.append(meta);
-  }
-  logEl.prepend(li);
 }
 
 function encodeWav(samples, sampleRate) {
@@ -143,6 +135,7 @@ function encodeWav(samples, sampleRate) {
 async function startRec() {
   if (rec) return;
   stopAudio(); // barge-in: cut off any in-progress reply
+  orb.classList.remove("urgent"); // engaging acknowledges the chime
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -167,14 +160,14 @@ async function startRec() {
   let stopped = false;
 
   rec = { ctx, stream, node, stop: null };
-  mic.classList.add("listening");
+  orb.classList.add("listening");
   setStatus("Listening…");
 
   const finish = async () => {
     if (stopped) return;
     stopped = true;
     rec = null;
-    mic.classList.remove("listening");
+    orb.classList.remove("listening");
     try { node.disconnect(); } catch {}
     try { await ctx.close(); } catch {}
     stream.getTracks().forEach((t) => t.stop());
@@ -219,15 +212,15 @@ async function sendUtterance(wavBlob) {
     setStatus("Hmm — " + data.error + ". " + defaultPrompt());
     return;
   }
-  addTurn(data.transcript || "(silence)", data.speech || "", data.intent);
+  showTurn(data.transcript || "(silence)", data.speech || "");
   setStatus(defaultPrompt());
   if (data.speech) speak(data.speech);
 }
 
-// --- input wiring: press-and-hold on mic, hold space ---
+// --- input wiring: press-and-hold on the orb, hold space ---
 
 let spaceDown = false;
-mic.addEventListener("pointerdown", (e) => { e.preventDefault(); startRec(); });
+orb.addEventListener("pointerdown", (e) => { e.preventDefault(); startRec(); });
 window.addEventListener("pointerup", () => { if (rec && rec.stop) rec.stop(); });
 window.addEventListener("pointercancel", () => { if (rec && rec.stop) rec.stop(); });
 window.addEventListener("keydown", (e) => {
@@ -246,7 +239,7 @@ window.addEventListener("keyup", (e) => {
 
 // --- urgent chime: two low soft tones in succession ---
 // Fired by the server over SSE when Switchboard reports a new urgent item.
-// No spoken content — the user asks "what was that?" to hear it.
+// The orb turns amber; no spoken content — ask "what was that?" to hear it.
 let chimeCtx = null;
 function chime() {
   try {
@@ -268,8 +261,8 @@ function chime() {
       osc.start(start);
       osc.stop(start + 0.46);
     }
-  } catch (e) { /* audio unavailable — the dot still shows */ }
-  $("urgent-dot").hidden = false;
+  } catch (e) { /* audio unavailable — the orb still shows */ }
+  orb.classList.add("urgent");
 }
 
 function watchEvents() {
@@ -287,57 +280,25 @@ function watchEvents() {
   // onerror: the browser reconnects automatically; nothing to do.
 }
 
-// --- integrations status ---
-
-async function refreshIntegrations() {
-  let list = [];
-  try {
-    const r = await fetch("/api/integrations");
-    list = (await r.json()).integrations || [];
-  } catch { /* leave empty */ }
-  const wrap = $("integrations");
-  wrap.innerHTML = "";
-  const short = { "Daily Briefing": "Briefing", "Ascent": "Ascent", "Relay": "Relay", "Switchboard": "Switchboard" };
-  for (const it of list) {
-    const chip = document.createElement("span");
-    chip.className = "chip " + (it.reachable ? "on" : "off");
-    chip.title = it.url + (it.ms != null ? ` — ${it.ms}ms` : "");
-    const dot = document.createElement("span");
-    dot.className = "dot";
-    chip.append(dot, document.createTextNode(short[it.name] || it.name));
-    wrap.append(chip);
-  }
-}
-
-// --- stt status + history ---
+// --- boot: show the most recent exchange, then listen for chimes ---
 
 async function boot() {
   try {
-    const [sttR, ttsR] = await Promise.all([fetch("/api/stt/status"), fetch("/api/tts/status")]);
-    const s = await sttR.json();
-    const v = await ttsR.json();
-    const bits = [];
-    bits.push(s.available ? `transcription ready (${s.model})` : "transcription not set up — run scripts/setup-stt.sh");
-    bits.push(v.available ? `neural voice ready (${v.voice})` : "neural voice not set up — run scripts/setup-tts.sh");
-    $("stt-note").textContent = bits.join(" · ");
-  } catch {
-    $("stt-note").textContent = "";
-  }
-  try {
-    const r = await fetch("/api/log?limit=10");
+    const r = await fetch("/api/log?limit=1");
     const { entries } = await r.json();
-    for (const e of (entries || []).reverse()) addTurn(e.transcript, e.speech, e.intent);
+    if (entries && entries.length) showTurn(entries[0].transcript, entries[0].speech);
   } catch { /* ignore */ }
-  refreshIntegrations();
-  setInterval(refreshIntegrations, 30000);
+  setStatus(defaultPrompt());
   watchEvents();
 }
 
-// --- type-instead fallback ---
+// --- collapsible text input ---
 
 $("text-toggle").addEventListener("click", () => {
   const f = $("textform");
+  const btn = $("text-toggle");
   f.hidden = !f.hidden;
+  btn.setAttribute("aria-expanded", String(!f.hidden));
   if (!f.hidden) $("textinput").focus();
 });
 $("textform").addEventListener("submit", async (e) => {
@@ -346,6 +307,7 @@ $("textform").addEventListener("submit", async (e) => {
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
+  orb.classList.remove("urgent");
   setStatus("Thinking…");
   try {
     const r = await fetch("/api/ask", {
@@ -354,10 +316,10 @@ $("textform").addEventListener("submit", async (e) => {
       body: JSON.stringify({ text }),
     });
     const data = await r.json();
-    addTurn(data.transcript || text, data.speech || data.error || "", data.intent);
+    showTurn(data.transcript || text, data.speech || data.error || "");
     if (data.speech) speak(data.speech);
   } catch {
-    addTurn(text, "Couldn't reach Sherry's server.", "");
+    showTurn(text, "Couldn't reach Sherry's server.");
   }
   setStatus(defaultPrompt());
 });
