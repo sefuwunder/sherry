@@ -514,7 +514,8 @@ export async function handle(req: Request): Promise<Response> {
   if (await file.exists()) {
     const ext = rel.split(".").pop() || "";
     const type = ext === "html" ? "text/html" : ext === "js" ? "text/javascript"
-      : ext === "css" ? "text/css" : ext === "svg" ? "image/svg+xml" : "application/octet-stream";
+      : ext === "css" ? "text/css" : ext === "svg" ? "image/svg+xml"
+      : ext === "png" ? "image/png" : "application/octet-stream";
     return new Response(file, { headers: { "content-type": type } });
   }
   if (p.startsWith("/api/")) return json({ error: "not found" }, 404);
