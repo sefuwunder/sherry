@@ -77,8 +77,14 @@ export async function synthesize(
     }
   }, timeoutMs);
   try {
-    proc.stdin.write(clean);
-    proc.stdin.end();
+    // The child may already have exited (bad binary, missing libs) — a
+    // failed write just means the exit code below tells the story.
+    try {
+      proc.stdin.write(clean);
+      proc.stdin.end();
+    } catch {
+      /* child already gone; fall through to proc.exited */
+    }
     const code = await proc.exited;
     if (timedOut) throw new Error("synthesis timed out");
     if (code !== 0) throw new Error(`piper exited with code ${code}`);
