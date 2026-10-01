@@ -44,9 +44,11 @@ First run for voice:
 
 ```sh
 sh scripts/setup-stt.sh      # whisper.cpp + model under data/ (gitignored)
+sh scripts/setup-tts.sh      # piper + neural voice under data/ (gitignored)
 ```
 
-Without it, the type-instead box still works and `/api/ask` answers text.
+Without them, the type-instead box still works and `/api/ask` answers text
+(spoken replies fall back to the browser's built-in voice).
 
 ## Wiring
 
@@ -65,8 +67,14 @@ Base URLs, localhost defaults, override with env:
    of silence (30 s hard cap), encodes WAV, POSTs to `/api/hear`.
 2. Server transcribes with local whisper.cpp (nothing leaves the machine).
 3. `src/router.ts` classifies the intent — pure function, no LLM.
-4. The action runs against the plugged-in app; the spoken reply goes back
-   and the browser reads it aloud (barge-in: grabbing the mic cancels speech).
+4. The action runs against the plugged-in app; the reply text goes back and
+   the browser plays it through the server's neural voice (`POST /api/speak`
+   → Piper WAV, `GET /api/tts/status` for readiness). Without the voice
+   engine it falls back to the browser's built-in speech. Barge-in (grabbing
+   the mic) cuts off either playback path.
+
+Swap voices any time: `PIPER_VOICE=en_US-lessac-medium sh scripts/setup-tts.sh`
+(default `en_US-amy-medium`). `PIPER_BIN` points at your own Piper build.
 
 Multi-turn: outbound Relay messages are staged for 2 minutes — Sherry reads
 the message back and only sends on “yes”. Switchboard digests are a triage

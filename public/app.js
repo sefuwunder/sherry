@@ -36,9 +36,18 @@ let rec = null; // active recording state or null
 
 function setStatus(t) { statusEl.innerHTML = t; }
 
-function speak(text) {
+let currentAudio = null; // active neural-voice playback, for barge-in
+
+function stopAudio() {
+  if (currentAudio) {
+    try { currentAudio.pause(); } catch (e) { /* noop */ }
+    currentAudio = null;
+  }
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+
+function speakBrowser(text) {
   if (!("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.rate = 1.05;
   const voices = speechSynthesis.getVoices();
@@ -46,10 +55,49 @@ function speak(text) {
     || voices.find((v) => v.lang && v.lang.startsWith("en"));
   if (pick) u.voice = pick;
   u.onstart = () => setStatus("Speaking… <span style='color:var(--muted);font-size:13px'>(hold the mic to interrupt)</span>");
-  u.onend = () => { if (!rec) setStatus(defaultPrompt()); };
+  u.onend = () => { if (!rec && !currentAudio) setStatus(defaultPrompt()); };
   speechSynthesis.speak(u);
 }
 if ("speechSynthesis" in window) speechSynthesis.getVoices();
+
+/** Speak via the server's neural voice when set up; browser voice otherwise. */
+async function speak(text) {
+  stopAudio();
+  try {
+    const r = await fetch("/api/speak", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (r.ok) {
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        if (currentAudio === audio) currentAudio = null;
+        if (!rec) setStatus(defaultPrompt());
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (currentAudio === audio) currentAudio = null;
+        speakBrowser(text);
+      };
+      setStatus("Speaking… <span style='color:var(--muted);font-size:13px'>(hold the mic to interrupt)</span>");
+      try {
+        await audio.play();
+      } catch (e) {
+        // autoplay blocked — fall back to the browser voice
+        if (currentAudio === audio) currentAudio = null;
+        URL.revokeObjectURL(url);
+        speakBrowser(text);
+      }
+      return;
+    }
+  } catch (e) { /* server unreachable — fall through */ }
+  speakBrowser(text);
+}
 
 function defaultPrompt() {
   return 'Hold the mic — or hold <kbd>space</kbd> — and talk';
@@ -94,7 +142,7 @@ function encodeWav(samples, sampleRate) {
 
 async function startRec() {
   if (rec) return;
-  if ("speechSynthesis" in window) speechSynthesis.cancel(); // barge-in
+  stopAudio(); // barge-in: cut off any in-progress reply
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -265,11 +313,13 @@ async function refreshIntegrations() {
 
 async function boot() {
   try {
-    const r = await fetch("/api/stt/status");
-    const s = await r.json();
-    $("stt-note").textContent = s.available
-      ? `offline transcription ready (${s.model})`
-      : "transcription not set up — run scripts/setup-stt.sh";
+    const [sttR, ttsR] = await Promise.all([fetch("/api/stt/status"), fetch("/api/tts/status")]);
+    const s = await sttR.json();
+    const v = await ttsR.json();
+    const bits = [];
+    bits.push(s.available ? `transcription ready (${s.model})` : "transcription not set up — run scripts/setup-stt.sh");
+    bits.push(v.available ? `neural voice ready (${v.voice})` : "neural voice not set up — run scripts/setup-tts.sh");
+    $("stt-note").textContent = bits.join(" · ");
   } catch {
     $("stt-note").textContent = "";
   }

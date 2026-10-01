@@ -7,6 +7,7 @@
 import { join } from "node:path";
 import { dataDir, logHear, recentHear } from "./db";
 import { transcribeBuffer, isValidWav, getSttStatus } from "./stt";
+import { synthesize, getTtsStatus } from "./tts";
 import { route, HELP_SPEECH, type Route } from "./router";
 import {
   integrationStatus, composeBrief, myDay, addTask,
@@ -338,6 +339,28 @@ export async function handle(req: Request): Promise<Response> {
 
   if (p === "/api/stt/status" && m === "GET") {
     return json(getSttStatus(dataDir()));
+  }
+
+  if (p === "/api/tts/status" && m === "GET") {
+    return json(getTtsStatus(dataDir()));
+  }
+
+  // --- neural voice: synthesize spoken replies server-side ---
+  if (p === "/api/speak" && m === "POST") {
+    let body: any = {};
+    try { body = await req.json(); } catch { /* keep */ }
+    const text = String(body.text || "").trim();
+    if (!text) return json({ error: "no text" }, 400);
+    try {
+      const wav = await synthesize(dataDir(), text);
+      return new Response(wav as unknown as BodyInit, {
+        headers: { "content-type": "audio/wav", "cache-control": "no-store" },
+      });
+    } catch (e: any) {
+      const msg = String(e?.message || "synthesis failed");
+      const ttsMissing = /not set up/i.test(msg);
+      return json({ error: msg, ttsMissing }, ttsMissing ? 503 : 500);
+    }
   }
 
   if (p === "/api/integrations" && m === "GET") {

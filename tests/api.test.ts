@@ -240,4 +240,63 @@ describe("/api/ask pipeline", () => {
     const d: any = await ask("what's on my plate");
     expect(d.speech).toMatch(/can't reach Ascent/);
   });
+
+  test("/api/tts/status reports engine state", async () => {
+    const r = await handle(new Request("http://x/api/tts/status"));
+    const s: any = await r.json();
+    expect(typeof s.available).toBe("boolean");
+    expect(typeof s.voice).toBe("string");
+  });
+
+  test("/api/speak 503s without a voice engine", async () => {
+    const saved = process.env.PIPER_BIN;
+    delete process.env.PIPER_BIN;
+    const r = await handle(new Request("http://x/api/speak", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hello" }),
+    }));
+    expect(r.status).toBe(503);
+    const d: any = await r.json();
+    expect(d.ttsMissing).toBe(true);
+    if (saved !== undefined) process.env.PIPER_BIN = saved;
+  });
+
+  test("/api/speak returns wav with a fake engine", async () => {
+    const { mkdtempSync: mk, writeFileSync: wf, chmodSync: ch } = await import("node:fs");
+    const { tmpdir: td } = await import("node:os");
+    const { join: jn } = await import("node:path");
+    const d = mk(jn(td(), "sherry-speak-"));
+    // minimal wav the fake copies to --output_file
+    const wav = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45]);
+    wf(jn(d, "out.wav"), wav);
+    wf(jn(d, "fake-piper"), `#!/bin/sh\nout=""; prev=""\nfor a in "$@"; do\nif [ "$prev" = "--output_file" ]; then out="$a"; fi\nprev="$a"\ndone\ncat > /dev/null\ncp "${jn(d, "out.wav")}" "$out"\n`);
+    ch(jn(d, "fake-piper"), 0o755);
+    const pd = mk(jn(td(), "sherry-piper-"));
+    const { mkdirSync: md } = await import("node:fs");
+    md(jn(pd, "piper"), { recursive: true });
+    wf(jn(pd, "piper", "v.onnx"), "x");
+    wf(jn(pd, "piper", "v.onnx.json"), "{}");
+    const savedBin = process.env.PIPER_BIN;
+    const savedVoice = process.env.PIPER_VOICE;
+    const savedData = process.env.SHERRY_DATA;
+    process.env.PIPER_BIN = jn(d, "fake-piper");
+    process.env.PIPER_VOICE = "v";
+    process.env.SHERRY_DATA = pd;
+    try {
+      const r = await handle(new Request("http://x/api/speak", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello there" }),
+      }));
+      expect(r.status).toBe(200);
+      expect(r.headers.get("content-type")).toBe("audio/wav");
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      expect([bytes[0], bytes[1], bytes[2], bytes[3]]).toEqual([0x52, 0x49, 0x46, 0x46]);
+    } finally {
+      if (savedBin !== undefined) process.env.PIPER_BIN = savedBin; else delete process.env.PIPER_BIN;
+      if (savedVoice !== undefined) process.env.PIPER_VOICE = savedVoice; else delete process.env.PIPER_VOICE;
+      if (savedData !== undefined) process.env.SHERRY_DATA = savedData;
+    }
+  });
 });
