@@ -15,6 +15,7 @@ import {
   digestItems, snoozeNotification, dismissNotification,
   findChannel, muteChannel, unmuteChannel,
   getQuietState, urgentSince, getChannels,
+  listRuns, startResearch, summarizeRun, researchStatus, findRun,
   type DigestItem,
 } from "./clients";
 
@@ -55,8 +56,10 @@ interface PendingSend {
 }
 let pendingSend: PendingSend | null = null;
 let triage: { items: DigestItem[]; index: number } | null = null;
-let lastChimed: Array<{ id: number; title: string; channelLabel: string }> = [];
+/** Last attention-worthy events, for "what was that?". detail is preformatted speech. */
+let lastChimed: Array<{ kind: "switchboard" | "research"; detail: string }> = [];
 let lastUrgentSeenAt = 0;
+let runStatuses = new Map<number, string>();
 
 /** Test hook: clear multi-turn conversation state. */
 export function __resetConversationForTests(): void {
@@ -64,10 +67,11 @@ export function __resetConversationForTests(): void {
   triage = null;
   lastChimed = [];
   lastUrgentSeenAt = 0;
+  runStatuses = new Map();
 }
 
 /** Test hook: seed the last-chimed list. */
-export function __setLastChimedForTests(items: Array<{ id: number; title: string; channelLabel: string }>): void {
+export function __setLastChimedForTests(items: Array<{ kind: "switchboard" | "research"; detail: string }>): void {
   lastChimed = items;
 }
 
@@ -97,6 +101,18 @@ export async function __syncUrgentForTests(silent: boolean): Promise<boolean> {
 }
 
 async function syncUrgent(silent: boolean): Promise<boolean> {
+  const a = await syncSwitchboard(silent);
+  const b = await syncResearch(silent);
+  return a || b;
+}
+
+function pushChime(kind: "switchboard" | "research", detail: string): void {
+  lastChimed.push({ kind, detail });
+  lastChimed = lastChimed.slice(-3);
+  broadcast({ type: "urgent", kind, time: Date.now() });
+}
+
+async function syncSwitchboard(silent: boolean): Promise<boolean> {
   let fresh;
   try {
     fresh = await urgentSince(lastUrgentSeenAt);
@@ -114,13 +130,45 @@ async function syncUrgent(silent: boolean): Promise<boolean> {
     const ch = await getChannels();
     if (ch.ok) for (const c of ch.channels) labels.set(c.id, c.label || c.id);
   } catch { /* labels optional */ }
-  lastChimed = fresh.slice(-3).map((n) => ({
-    id: n.id,
-    title: String(n.title || "notification"),
-    channelLabel: labels.get(n.channel_id || "") || "",
-  }));
-  broadcast({ type: "urgent", count: fresh.length, time: Date.now() });
+  const bits = fresh.slice(-3).map((n) => {
+    const label = labels.get(n.channel_id || "");
+    return `${label ? label + " — " : ""}${String(n.title || "notification")}`;
+  });
+  pushChime("switchboard", bits.join(". "));
   return true;
+}
+
+/** Chime when a Longview run reaches a terminal state. Transitions only —
+ *  the initial sync marks everything seen without chiming. */
+async function syncResearch(silent: boolean): Promise<boolean> {
+  let runs;
+  try {
+    const l = await listRuns();
+    if (!l.ok) return false;
+    runs = l.runs;
+  } catch {
+    return false; // Longview unreachable — try next tick
+  }
+  let chimed = false;
+  for (const run of runs) {
+    const prev = runStatuses.get(run.id);
+    if (prev === undefined) {
+      runStatuses.set(run.id, run.status);
+      continue;
+    }
+    if (prev === run.status) continue;
+    runStatuses.set(run.id, run.status);
+    if (silent) continue;
+    if (run.status === "done") {
+      pushChime("research",
+        `Research complete: "${run.question}" — ${run.findings} findings. Ask me what it found.`);
+      chimed = true;
+    } else if (run.status === "error") {
+      pushChime("research", `Research on "${run.question}" ran into an error.`);
+      chimed = true;
+    }
+  }
+  return chimed;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -290,8 +338,29 @@ async function act(r: Route): Promise<ActionResult> {
     }
     case "what_was_that": {
       if (!lastChimed.length) return { speech: "Nothing chimed recently." };
-      const bits = lastChimed.map((c) => `${c.channelLabel ? c.channelLabel + " — " : ""}${c.title}`);
-      return { speech: `That was: ${bits.join(". ")}.` };
+      return { speech: `That was: ${lastChimed.map((c) => c.detail).join(". ")}.` };
+    }
+    case "research_start": {
+      const topic = (r.slots.topic || "").trim();
+      if (!topic) return { speech: "What should I research?" };
+      const s = await startResearch(topic);
+      if (!s.ok) return { speech: s.error || "Couldn't start the research." };
+      return { speech: `Research started on "${topic}". I'll chime when it's done.` };
+    }
+    case "research_status": {
+      const { speech } = await researchStatus();
+      return { speech };
+    }
+    case "research_findings": {
+      const l = await listRuns();
+      if (!l.ok) return { speech: l.error || "Couldn't reach Longview." };
+      const topic = (r.slots.topic || "").trim();
+      const run = findRun(l.runs, topic || undefined);
+      if (!run) {
+        return { speech: topic ? `No finished research on "${topic}" yet.` : "No finished research yet." };
+      }
+      const { speech } = await summarizeRun(run.id);
+      return { speech };
     }
     case "help":
       return { speech: HELP_SPEECH };

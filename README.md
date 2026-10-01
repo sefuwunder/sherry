@@ -14,6 +14,9 @@ routes the command deterministically, and speaks the answer back.
 | “any new messages” | Relay — unread conversations |
 | “what's new” | Switchboard — spoken triage digest (see below) |
 | “mute GitHub for today” / “unmute GitHub” | Switchboard — channel-level mute |
+| “research electric vehicle subsidies” | Longview — starts a research run, chimes when done |
+| “research status” / “how's my research” | Longview — running + recent runs |
+| “what did you find on tariffs” | Longview — reads the key points aloud |
 
 ### Switchboard: the honest integration
 
@@ -33,6 +36,17 @@ Sherry consumes Switchboard's attention model instead of reimplementing it:
   repeats, and stays silent during quiet hours unless urgent breaks through.
 - **Channel-level voice commands.** "Mute GitHub for today" / "for 2 hours" /
   "unmute GitHub" — broad strokes are what voice is good at.
+
+### Longview: research by voice
+
+- **"Research <topic>"** starts an agent run; Sherry says so and the same
+  two-tone chime fires when the run finishes (or errors) — "what was that?"
+  reveals it, and "what did you find on <topic>" reads the report's key
+  points aloud.
+- **"Research status"** / **"how's my research"** summarizes running and
+  recent runs with finding counts.
+- Summaries are extractive (the report's own "Key points" bullets), never
+  generated — same determinism as the rest of Sherry.
 
 ## Run
 
@@ -58,6 +72,9 @@ Base URLs, localhost defaults, override with env:
 - `ASCENT_URL` (default `http://127.0.0.1:3004`)
 - `RELAY_URL` (default `http://127.0.0.1:3006`)
 - `SWITCHBOARD_URL` (default `http://127.0.0.1:3002`)
+- `LONGVIEW_URL` (default `http://127.0.0.1:3011`) — note: Longview and
+  Idea Party both default to port 3011 upstream. If you run both, move one
+  with `PORT=` and point `LONGVIEW_URL` at Longview.
 
 `/api/integrations` reports reachability; the header shows a dot per app.
 

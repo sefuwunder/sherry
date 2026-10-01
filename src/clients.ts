@@ -10,6 +10,9 @@ export function bases() {
     ascent: (process.env.ASCENT_URL || "http://127.0.0.1:3004").replace(/\/$/, ""),
     relay: (process.env.RELAY_URL || "http://127.0.0.1:3006").replace(/\/$/, ""),
     switchboard: (process.env.SWITCHBOARD_URL || "http://127.0.0.1:3002").replace(/\/$/, ""),
+    // NOTE: longview and idea-party both default to :3011 upstream — if you
+    // run both, put one on another port and point LONGVIEW_URL at longview.
+    longview: (process.env.LONGVIEW_URL || "http://127.0.0.1:3011").replace(/\/$/, ""),
   };
 }
 
@@ -60,6 +63,7 @@ export async function integrationStatus(): Promise<IntegrationStatus[]> {
     ["Ascent", b.ascent, "/api/status"],
     ["Relay", b.relay, "/api/status"],
     ["Switchboard", b.switchboard, "/api/health"],
+    ["Longview", b.longview, "/api/agent"],
   ];
   return Promise.all(
     defs.map(async ([name, url, health]) => {
@@ -397,4 +401,104 @@ export async function dismissNotification(id: number): Promise<{ ok: boolean; er
   const b = bases();
   const r = await post(b.switchboard, `/api/notifications/${id}/dismiss`, {});
   return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+// ---------------------------------------------------------------- longview
+
+export interface LvRun {
+  id: number;
+  question: string;
+  status: string; // pending | working | done | error
+  created_at: number;
+  findings: number;
+  sources: number;
+}
+
+const LV_UNREACHABLE = "I can't reach Longview. Is it running?";
+
+export async function listRuns(): Promise<{ ok: boolean; runs: LvRun[]; error?: string }> {
+  const r = await get(bases().longview, "/api/agent");
+  if (!r.ok || !r.data?.ok) return { ok: false, runs: [], error: LV_UNREACHABLE };
+  const runs: LvRun[] = (r.data.runs || []).map((x: any) => ({
+    id: Number(x.id),
+    question: String(x.question || ""),
+    status: String(x.status || ""),
+    created_at: Number(x.created_at || 0),
+    findings: Number(x.findings || 0),
+    sources: Number(x.sources || 0),
+  }));
+  return { ok: true, runs };
+}
+
+export async function startResearch(question: string): Promise<{ ok: boolean; runId?: number; error?: string }> {
+  const r = await post(bases().longview, "/api/agent", { question });
+  if (!r.ok) return { ok: false, error: LV_UNREACHABLE };
+  if (!r.data?.ok) return { ok: false, error: r.data?.error || "Longview refused the research request." };
+  return { ok: true, runId: Number(r.data.run_id) };
+}
+
+export async function getRun(id: number): Promise<{ ok: boolean; run?: any; error?: string }> {
+  const r = await get(bases().longview, `/api/agent/${id}`);
+  if (!r.ok || !r.data?.ok) return { ok: false, error: "Couldn't load that research run." };
+  return { ok: true, run: r.data.run };
+}
+
+/** Extract up to maxPoints spoken key points from a Longview report.
+ *  Pure function — the report's "## Key points" bullets, markdown stripped. */
+export function spokenSummary(reportMd: string, maxPoints = 3): string[] {
+  const lines = String(reportMd || "").split("\n");
+  const start = lines.findIndex((l) => /^##\s+key points/i.test(l.trim()));
+  const points: string[] = [];
+  if (start >= 0) {
+    for (const l of lines.slice(start + 1)) {
+      if (/^##\s/.test(l.trim())) break;
+      const m = l.match(/^\s*-\s+(.+)$/);
+      if (m) {
+        points.push(
+          m[1].trim()
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+            .replace(/[*_~`]/g, "")
+        );
+      }
+      if (points.length >= maxPoints) break;
+    }
+  }
+  return points.filter(Boolean);
+}
+
+export async function summarizeRun(id: number): Promise<{ speech: string; ok: boolean }> {
+  const g = await getRun(id);
+  if (!g.ok || !g.run) return { ok: false, speech: g.error || "Couldn't load that research." };
+  const run = g.run;
+  const q = String(run.question || "that topic");
+  if (run.status !== "done") {
+    const state = run.status === "working" || run.status === "pending" ? "still running" : `in state ${run.status}`;
+    return { ok: true, speech: `Research on "${q}" is ${state}.` };
+  }
+  const points = spokenSummary(String(run.report_md || ""));
+  if (!points.length) return { ok: true, speech: `Research on "${q}" is done, but produced no key points.` };
+  return { ok: true, speech: `On "${q}": ${points.map((p, i) => `${i + 1}. ${p}`).join(" ")}` };
+}
+
+export async function researchStatus(): Promise<{ speech: string; ok: boolean }> {
+  const l = await listRuns();
+  if (!l.ok) return { ok: false, speech: l.error || LV_UNREACHABLE };
+  const working = l.runs.filter((r) => r.status === "working" || r.status === "pending");
+  const done = l.runs.filter((r) => r.status === "done").slice(0, 3);
+  const bits: string[] = [];
+  if (working.length) {
+    bits.push(`Running: ${working.slice(0, 3).map((r) => `"${r.question}"`).join(", ")}.`);
+  }
+  if (done.length) {
+    bits.push(`Recent: ${done.map((r) => `"${r.question}" (${r.findings} findings)`).join(", ")}.`);
+  }
+  return { ok: true, speech: bits.join(" ") || "No research runs yet." };
+}
+
+/** Latest done run, optionally matching a topic substring (case-insensitive). */
+export function findRun(runs: LvRun[], topic?: string): LvRun | null {
+  const done = runs.filter((r) => r.status === "done");
+  if (!topic) return done[0] || null;
+  const q = topic.toLowerCase();
+  return done.find((r) => r.question.toLowerCase().includes(q)) || null;
 }

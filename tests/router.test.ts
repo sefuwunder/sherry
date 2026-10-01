@@ -70,6 +70,34 @@ describe("router", () => {
     expect(route("tell me a joke about elephants").intent).toBe("unknown");
   });
 
+  test("research_start", () => {
+    const r = route("research electric vehicle subsidies");
+    expect(r.intent).toBe("research_start");
+    expect(r.slots.topic).toBe("electric vehicle subsidies");
+    expect(route("look into zoning laws").intent).toBe("research_start");
+    expect(route("investigate supply chain delays").slots.topic).toBe("supply chain delays");
+  });
+
+  test("research_status", () => {
+    expect(route("research status").intent).toBe("research_status");
+    expect(route("research update").intent).toBe("research_status");
+    expect(route("how's my research").intent).toBe("research_status");
+    expect(route("any research running").intent).toBe("research_status");
+  });
+
+  test("research_findings", () => {
+    const r = route("what did you find on tariffs");
+    expect(r.intent).toBe("research_findings");
+    expect(r.slots.topic).toBe("tariffs");
+    expect(route("summarize the tariff research").slots.topic).toBe("tariff");
+    expect(route("what did you find").intent).toBe("research_findings");
+    expect(route("research findings").slots.topic).toBeUndefined();
+  });
+
+  test("research status wins over research topic", () => {
+    expect(route("research status").intent).toBe("research_status");
+  });
+
   test("triage_next", () => {
     expect(route("next").intent).toBe("triage_next");
     expect(route("skip").intent).toBe("triage_next");

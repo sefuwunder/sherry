@@ -17,7 +17,7 @@ function stub(routes: Record<string, (req: Request) => Response | Promise<Respon
   return `http://127.0.0.1:${s.port}`;
 }
 
-let B = { briefing: "", ascent: "", relay: "", switchboard: "" };
+let B = { briefing: "", ascent: "", relay: "", switchboard: "", longview: "" };
 
 beforeAll(() => {
   const j = (d: any, st = 200) => new Response(JSON.stringify(d), { status: st, headers: { "content-type": "application/json" } });
@@ -85,6 +85,30 @@ beforeAll(() => {
   process.env.RELAY_URL = B.relay;
   process.env.SWITCHBOARD_URL = B.switchboard;
   process.env.BRIEFING_CITY = "Cincinnati";
+
+  B.longview = stub({
+    "GET /api/agent": () => j({
+      ok: true,
+      runs: [
+        { id: 1, question: "EV subsidies", status: "done", created_at: 1000, findings: 3, sources: 8 },
+        { id: 2, question: "sourdough", status: "working", created_at: 2000, findings: 0, sources: 1 },
+      ],
+    }),
+    "POST /api/agent": async (req) => {
+      const b: any = await req.json();
+      return b.question ? j({ ok: true, run_id: 7 }, 202) : j({ ok: false, error: "nope" }, 400);
+    },
+    "GET /api/agent/1": () => j({
+      ok: true,
+      run: {
+        id: 1, question: "EV subsidies", status: "done",
+        report_md: "# EV subsidies\n\n_Extract…_\n\n## Key points\n\n- Subsidies rose 12%.\n- [Three states](http://x) added rebates.\n- _The_ federal credit *expires* in 2027.\n- Fourth point.\n\n## Sources\n",
+      },
+    }),
+    "GET /api/agent/2": () => j({ ok: true, run: { id: 2, question: "sourdough", status: "working" } }),
+    "GET /api/agent/99": () => j({ ok: false, error: "not found" }, 404),
+  });
+  process.env.LONGVIEW_URL = B.longview;
 });
 
 afterAll(() => { for (const s of stubs) s.stop(); });
@@ -96,7 +120,7 @@ const C = await import("../src/clients");
 describe("clients", () => {
   test("integrationStatus reports all reachable", async () => {
     const st = await C.integrationStatus();
-    expect(st).toHaveLength(4);
+    expect(st).toHaveLength(5);
     expect(st.every((s) => s.reachable)).toBe(true);
   });
 
@@ -189,5 +213,56 @@ describe("clients", () => {
     expect(r.ok).toBe(false);
     expect(r.speech).toMatch(/can't reach/i);
     process.env.BRIEFING_URL = B.briefing;
+  });
+
+  test("longview: list/start/get runs", async () => {
+    const l = await C.listRuns();
+    expect(l.ok).toBe(true);
+    expect(l.runs).toHaveLength(2);
+    expect(l.runs[0].question).toBe("EV subsidies");
+    const s = await C.startResearch("tariffs");
+    expect(s.ok).toBe(true);
+    expect(s.runId).toBe(7);
+    const g = await C.getRun(1);
+    expect(g.ok).toBe(true);
+    expect(g.run.question).toBe("EV subsidies");
+    expect((await C.getRun(99)).ok).toBe(false);
+  });
+
+  test("longview: spokenSummary extracts key points", () => {
+    const md = "# Q\n\n## Key points\n\n- First *point*.\n- [Second](http://x) point.\n- Third.\n- Fourth (dropped).\n\n## Sources\n";
+    expect(C.spokenSummary(md)).toEqual(["First point.", "Second point.", "Third."]);
+    expect(C.spokenSummary(md, 2)).toHaveLength(2);
+    expect(C.spokenSummary("no sections here")).toEqual([]);
+  });
+
+  test("longview: summarizeRun speaks findings or state", async () => {
+    const done = await C.summarizeRun(1);
+    expect(done.ok).toBe(true);
+    expect(done.speech).toMatch(/On "EV subsidies"/);
+    expect(done.speech).toMatch(/1\. Subsidies rose 12%/);
+    expect(done.speech).toMatch(/3\. The federal credit expires in 2027/);
+    expect(done.speech).not.toMatch(/Fourth/);
+    const working = await C.summarizeRun(2);
+    expect(working.speech).toMatch(/still running/);
+  });
+
+  test("longview: researchStatus + findRun", async () => {
+    const st = await C.researchStatus();
+    expect(st.ok).toBe(true);
+    expect(st.speech).toMatch(/Running: "sourdough"/);
+    expect(st.speech).toMatch(/"EV subsidies" \(3 findings\)/);
+    const l = await C.listRuns();
+    expect(C.findRun(l.runs, "ev sub")!.id).toBe(1);
+    expect(C.findRun(l.runs)!.id).toBe(1);
+    expect(C.findRun(l.runs, "nope")).toBeNull();
+  });
+
+  test("longview: unreachable degrades", async () => {
+    process.env.LONGVIEW_URL = "http://127.0.0.1:1";
+    const l = await C.listRuns();
+    expect(l.ok).toBe(false);
+    expect(l.error).toMatch(/can't reach Longview/i);
+    process.env.LONGVIEW_URL = B.longview;
   });
 });

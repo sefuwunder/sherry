@@ -16,6 +16,9 @@ export type IntentName =
   | "mute_channel"
   | "unmute_channel"
   | "what_was_that"
+  | "research_start"
+  | "research_status"
+  | "research_findings"
   | "help"
   | "unknown";
 
@@ -100,6 +103,31 @@ export function route(raw: string): Route {
     return { intent: "mute_channel", slots: { channel: m[1].trim(), duration: (m[2] || "").trim() } };
   }
 
+  // --- longview: research status (before research_start: "research status" has a topic) ---
+  if (/^research (status|update)$/.test(t)
+    || /\bhow'?s my research\b/.test(t)
+    || /\bany research (running|going on)\b/.test(t)) {
+    return { intent: "research_status", slots: {} };
+  }
+
+  // --- longview: findings ---
+  // "what did you find on tariffs" / "summarize the tariff research" / "research findings"
+  // (before research_start: bare "research findings" is a findings query, not a topic)
+  m = t.match(/^what did you find (?:on |about )?(.+)$/);
+  if (m) return { intent: "research_findings", slots: { topic: m[1].trim() } };
+  m = t.match(/^summarize (?:the |my )?(.+?) research$/);
+  if (m) return { intent: "research_findings", slots: { topic: m[1].trim() } };
+  if (/^(what did you find|research findings|show findings)$/.test(t)) {
+    return { intent: "research_findings", slots: {} };
+  }
+
+  // --- longview: start a research run ---
+  // "research electric vehicle subsidies" / "look into zoning laws" / "investigate supply chain delays"
+  m = t.match(/^(?:research|look into|investigate) (.+)$/);
+  if (m) {
+    return { intent: "research_start", slots: { topic: m[1].trim() } };
+  }
+
   // --- switchboard: digest ---
   if (/\b(what'?s new|anything urgent|notifications?|alerts?)\b/.test(t)) {
     return { intent: "digest", slots: {} };
@@ -128,4 +156,4 @@ export function route(raw: string): Route {
 export const HELP_SPEECH =
   "You can say: brief me. What's on my plate. Add task buy milk. " +
   "Message Shy I'll be late. Any new messages. What's new — then next, snooze, or dismiss. " +
-  "Mute GitHub for today. Or unmute GitHub.";
+  "Mute GitHub for today. Or unmute GitHub. Research electric cars.";

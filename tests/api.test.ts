@@ -22,6 +22,8 @@ function stub(routes: Record<string, (req: Request) => Response | Promise<Respon
 const j = (d: any, st = 200) => new Response(JSON.stringify(d), { status: st, headers: { "content-type": "application/json" } });
 let sent: any[] = [];
 let muted: any[] = [];
+let lvRuns: any[] = [];
+let lvStarted: string[] = [];
 
 beforeAll(() => {
   const tmp = mkdtempSync(join(tmpdir(), "sherry-test-"));
@@ -82,6 +84,30 @@ beforeAll(() => {
   process.env.ASCENT_URL = ascent;
   process.env.RELAY_URL = relay;
   process.env.SWITCHBOARD_URL = sw;
+
+  lvRuns = [
+    { id: 1, question: "EV subsidies", status: "done", created_at: 1000, findings: 3, sources: 8 },
+    { id: 2, question: "sourdough starters", status: "working", created_at: 2000, findings: 0, sources: 2 },
+  ];
+  lvStarted = [];
+  const lv = stub({
+    "GET /api/agent": () => j({ ok: true, runs: lvRuns }),
+    "POST /api/agent": async (req) => {
+      const b: any = await req.json();
+      if (!String(b.question || "").trim()) return j({ ok: false, error: "question is required" }, 400);
+      lvStarted.push(String(b.question));
+      return j({ ok: true, run_id: 99 }, 202);
+    },
+    "GET /api/agent/1": () => j({
+      ok: true,
+      run: {
+        id: 1, question: "EV subsidies", status: "done",
+        report_md: "# EV subsidies\n\n## Key points\n\n- Subsidies rose 12% in 2025.\n- Three states added rebates.\n- The federal credit expires in 2027.\n\n## Sources\n\n1. [x](http://x)\n",
+      },
+    }),
+    "GET /api/agent/2": () => j({ ok: true, run: { id: 2, question: "sourdough starters", status: "working" } }),
+  });
+  process.env.LONGVIEW_URL = lv;
 });
 
 afterAll(() => { for (const s of stubs) s.stop(); });
@@ -208,7 +234,7 @@ describe("/api/ask pipeline", () => {
     const q: any = await ask("what was that");
     expect(q.intent).toBe("what_was_that");
     expect(q.speech).toMatch(/Nothing chimed/);
-    __setLastChimedForTests([{ id: 5, title: "Server down", channelLabel: "GitHub" }]);
+    __setLastChimedForTests([{ kind: "switchboard", detail: "GitHub — Server down" }]);
     const q2: any = await ask("what was that");
     expect(q2.speech).toMatch(/That was: GitHub — Server down/);
   });
@@ -239,6 +265,54 @@ describe("/api/ask pipeline", () => {
     process.env.ASCENT_URL = "http://127.0.0.1:1";
     const d: any = await ask("what's on my plate");
     expect(d.speech).toMatch(/can't reach Ascent/);
+  });
+
+  test("research_start kicks off a run", async () => {
+    const { __resetConversationForTests } = await import("../src/app");
+    __resetConversationForTests();
+    lvStarted = [];
+    const d: any = await ask("research electric vehicle subsidies");
+    expect(d.intent).toBe("research_start");
+    expect(d.speech).toMatch(/Research started on "electric vehicle subsidies"/);
+    expect(d.speech).toMatch(/I'll chime when it's done/);
+    expect(lvStarted).toEqual(["electric vehicle subsidies"]);
+  });
+
+  test("research_status summarizes running and recent", async () => {
+    const d: any = await ask("research status");
+    expect(d.intent).toBe("research_status");
+    expect(d.speech).toMatch(/Running: "sourdough starters"/);
+    expect(d.speech).toMatch(/Recent: "EV subsidies" \(3 findings\)/);
+  });
+
+  test("research_findings reads key points aloud", async () => {
+    const d: any = await ask("what did you find on EV");
+    expect(d.intent).toBe("research_findings");
+    expect(d.speech).toMatch(/On "EV subsidies"/);
+    expect(d.speech).toMatch(/Subsidies rose 12% in 2025/);
+    expect(d.speech).toMatch(/federal credit expires in 2027/);
+  });
+
+  test("research_findings with no match says so", async () => {
+    const d: any = await ask("what did you find on mars colonies");
+    expect(d.speech).toMatch(/No finished research on "mars colonies" yet/);
+  });
+
+  test("research completion chimes, what-was-that reveals", async () => {
+    const { __resetConversationForTests, __syncUrgentForTests } = await import("../src/app");
+    __resetConversationForTests();
+    // silent initial sync marks run 2 as working
+    expect(await __syncUrgentForTests(true)).toBe(false);
+    // run 2 finishes -> chime
+    lvRuns.find((r) => r.id === 2)!.status = "done";
+    lvRuns.find((r) => r.id === 2)!.findings = 4;
+    expect(await __syncUrgentForTests(false)).toBe(true);
+    const q: any = await ask("what was that");
+    expect(q.speech).toMatch(/Research complete: "sourdough starters" — 4 findings/);
+    // restore: no further transitions -> silent
+    expect(await __syncUrgentForTests(false)).toBe(false);
+    lvRuns.find((r) => r.id === 2)!.status = "working";
+    lvRuns.find((r) => r.id === 2)!.findings = 0;
   });
 
   test("/api/tts/status reports engine state", async () => {
