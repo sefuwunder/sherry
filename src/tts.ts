@@ -17,7 +17,7 @@ export interface TtsPaths {
  *  data/piper/). */
 export function ttsPaths(dataDir: string): TtsPaths {
   const bin = process.env.PIPER_BIN || join(dataDir, "piper", "piper");
-  const voiceName = process.env.PIPER_VOICE || "en_US-amy-medium";
+  const voiceName = process.env.PIPER_VOICE || "en_GB-jenny_dioco-medium";
   const voice = join(dataDir, "piper", `${voiceName}.onnx`);
   return { bin, voice, voiceName };
 }

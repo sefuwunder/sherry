@@ -74,7 +74,7 @@ describe("tts", () => {
     expect(isTtsAvailable(dir)).toBe(false);
     const s = getTtsStatus(dir);
     expect(s.available).toBe(false);
-    expect(s.voice).toBe("en_US-amy-medium"); // default voice name
+    expect(s.voice).toBe("en_GB-jenny_dioco-medium"); // default voice name
   });
 
   test("available with fake engine", () => {

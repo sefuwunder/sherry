@@ -1,14 +1,14 @@
 #!/bin/sh
 # sherry: set up offline neural voice (Piper TTS + voice model).
 # Idempotent — safe to re-run. Everything lands under data/ (gitignored).
-# Env overrides: PIPER_VOICE (default en_US-amy-medium),
+# Env overrides: PIPER_VOICE (default en_GB-jenny_dioco-medium),
 #                PIPER_RELEASE (default v1.2.0),
 #                PIPER_BIN (skip install entirely; src/tts.ts uses this env directly).
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WDIR="$ROOT/data/piper"
-VOICE="${PIPER_VOICE:-en_US-amy-medium}"
+VOICE="${PIPER_VOICE:-en_GB-jenny_dioco-medium}"
 RELEASE="${PIPER_RELEASE:-v1.2.0}"
 BIN="$WDIR/piper"
 

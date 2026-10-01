@@ -73,8 +73,8 @@ Base URLs, localhost defaults, override with env:
    engine it falls back to the browser's built-in speech. Barge-in (grabbing
    the mic) cuts off either playback path.
 
-Swap voices any time: `PIPER_VOICE=en_US-lessac-medium sh scripts/setup-tts.sh`
-(default `en_US-amy-medium`). `PIPER_BIN` points at your own Piper build.
+Swap voices any time: `PIPER_VOICE=en_US-amy-medium sh scripts/setup-tts.sh`
+(default `en_GB-jenny_dioco-medium`). `PIPER_BIN` points at your own Piper build.
 
 Multi-turn: outbound Relay messages are staged for 2 minutes — Sherry reads
 the message back and only sends on “yes”. Switchboard digests are a triage
