@@ -8,6 +8,16 @@ import { join } from "node:path";
 import { dataDir, logHear, recentHear } from "./db";
 import { transcribeBuffer, isValidWav, getSttStatus } from "./stt";
 import { synthesize, getTtsStatus } from "./tts";
+import {
+  transcribeLive,
+  speakLive,
+  encodeWavPcm,
+  extractPcm16,
+  getLiveStatus,
+  liveAvailable,
+  sttEngine,
+  ttsEngine,
+} from "./live";
 import { route, HELP_SPEECH, type Route } from "./router";
 import {
   integrationStatus, composeBrief, myDay, addTask,
@@ -414,12 +424,35 @@ export async function handle(req: Request): Promise<Response> {
     return json(getTtsStatus(dataDir()));
   }
 
+  if (p === "/api/live/status" && m === "GET") {
+    return json(getLiveStatus());
+  }
+
   // --- neural voice: synthesize spoken replies server-side ---
   if (p === "/api/speak" && m === "POST") {
     let body: any = {};
     try { body = await req.json(); } catch { /* keep */ }
     const text = String(body.text || "").trim();
     if (!text) return json({ error: "no text" }, 400);
+    // Optional online engine: Gemini Live TTS. Falls back to the browser
+    // voice on the client when this errors.
+    if (ttsEngine() === "live") {
+      if (!liveAvailable()) {
+        return json({
+          error: "online voice not configured — set GEMINI_API_KEY (or SHERRY_TTS=local)",
+          ttsMissing: true,
+        }, 503);
+      }
+      try {
+        const { pcm, sampleRate } = await speakLive(text);
+        const wav = encodeWavPcm(pcm, sampleRate);
+        return new Response(wav as unknown as BodyInit, {
+          headers: { "content-type": "audio/wav", "cache-control": "no-store" },
+        });
+      } catch (e: any) {
+        return json({ error: `online voice failed: ${e?.message || e}` }, 500);
+      }
+    }
     try {
       const wav = await synthesize(dataDir(), text);
       return new Response(wav as unknown as BodyInit, {
@@ -458,18 +491,37 @@ export async function handle(req: Request): Promise<Response> {
     if (!isValidWav(wav)) return json({ error: "audio must be WAV" }, 400);
 
     let transcript: string;
-    try {
-      transcript = await transcribeBuffer(dataDir(), wav);
-    } catch (e: any) {
-      const msg = String(e?.message || "transcription failed");
-      const engineMissing = /not available/i.test(msg);
-      return json({
-        error: msg,
-        engineMissing,
-        speech: engineMissing
-          ? "Voice transcription isn't set up yet. Run scripts/setup-stt.sh, then restart me."
-          : "I couldn't make out any words. Try again.",
-      }, engineMissing ? 503 : 500);
+    // Optional online engine: Gemini Live transcription.
+    if (sttEngine() === "live") {
+      if (!liveAvailable()) {
+        return json({
+          error: "online transcription not configured — set GEMINI_API_KEY (or SHERRY_STT=local)",
+          engineMissing: true,
+          speech: "Online transcription isn't set up yet. Set GEMINI_API_KEY, or switch back with SHERRY_STT=local.",
+        }, 503);
+      }
+      try {
+        transcript = await transcribeLive(extractPcm16(wav));
+      } catch (e: any) {
+        return json({
+          error: `online transcription failed: ${e?.message || e}`,
+          speech: "I couldn't reach the online transcription service. Try again.",
+        }, 500);
+      }
+    } else {
+      try {
+        transcript = await transcribeBuffer(dataDir(), wav);
+      } catch (e: any) {
+        const msg = String(e?.message || "transcription failed");
+        const engineMissing = /not available/i.test(msg);
+        return json({
+          error: msg,
+          engineMissing,
+          speech: engineMissing
+            ? "Voice transcription isn't set up yet. Run scripts/setup-stt.sh, then restart me."
+            : "I couldn't make out any words. Try again.",
+        }, engineMissing ? 503 : 500);
+      }
     }
     if (!transcript) {
       return json({ transcript: "", intent: "unknown", speech: "I didn't hear anything. Try again." });

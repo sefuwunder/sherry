@@ -315,11 +315,60 @@ describe("/api/ask pipeline", () => {
     lvRuns.find((r) => r.id === 2)!.findings = 0;
   });
 
-  test("/api/tts/status reports engine state", async () => {
-    const r = await handle(new Request("http://x/api/tts/status"));
+  test("/api/live/status reports engine state", async () => {
+    const r = await handle(new Request("http://x/api/live/status"));
     const s: any = await r.json();
     expect(typeof s.available).toBe("boolean");
+    expect(typeof s.model).toBe("string");
     expect(typeof s.voice).toBe("string");
+    expect(["local", "live"]).toContain(s.stt);
+    expect(["local", "live"]).toContain(s.tts);
+    expect("GEMINI_API_KEY" in s).toBe(false); // key never exposed
+  });
+
+  test("/api/speak 503s in live mode without a key", async () => {
+    const savedKey = process.env.GEMINI_API_KEY;
+    const savedTts = process.env.SHERRY_TTS;
+    delete process.env.GEMINI_API_KEY;
+    process.env.SHERRY_TTS = "live";
+    try {
+      const r = await handle(new Request("http://x/api/speak", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "hi" }),
+      }));
+      expect(r.status).toBe(503);
+      const b: any = await r.json();
+      expect(b.ttsMissing).toBe(true);
+    } finally {
+      if (savedKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = savedKey;
+      if (savedTts === undefined) delete process.env.SHERRY_TTS;
+      else process.env.SHERRY_TTS = savedTts;
+    }
+  });
+
+  test("/api/hear 503s in live mode without a key", async () => {
+    const savedKey = process.env.GEMINI_API_KEY;
+    const savedStt = process.env.SHERRY_STT;
+    delete process.env.GEMINI_API_KEY;
+    process.env.SHERRY_STT = "live";
+    try {
+      // minimal valid WAV header (isValidWav only checks RIFF/WAVE magic)
+      const wav = new Uint8Array(48);
+      wav.set([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]);
+      const form = new FormData();
+      form.append("audio", new Blob([wav as unknown as BlobPart]), "u.wav");
+      const r = await handle(new Request("http://x/api/hear", { method: "POST", body: form }));
+      expect(r.status).toBe(503);
+      const b: any = await r.json();
+      expect(b.engineMissing).toBe(true);
+    } finally {
+      if (savedKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = savedKey;
+      if (savedStt === undefined) delete process.env.SHERRY_STT;
+      else process.env.SHERRY_STT = savedStt;
+    }
   });
 
   test("/api/speak 503s without a voice engine", async () => {

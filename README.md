@@ -93,6 +93,27 @@ Base URLs, localhost defaults, override with env:
 Swap voices any time: `PIPER_VOICE=en_US-amy-medium sh scripts/setup-tts.sh`
 (default `en_GB-jenny_dioco-medium`). `PIPER_BIN` points at your own Piper build.
 
+### Online voice (optional): Gemini Live
+
+Prefer the cloud over local models? Set `GEMINI_API_KEY` (from
+[AI Studio](https://aistudio.google.com/apikey)) and choose the engine per
+direction — the key never leaves the server:
+
+```sh
+SHERRY_STT=live SHERRY_TTS=live GEMINI_API_KEY=… bun src/server.ts
+```
+
+- `SHERRY_STT=live` — transcription via the Live API's streaming
+  transcription instead of whisper.cpp (no 141 MB download).
+- `SHERRY_TTS=live` — a natural Live voice instead of Piper
+  (`GEMINI_LIVE_VOICE`, default `Kore`).
+- Everything else is unchanged: the deterministic router, all
+  integrations, and the `/api/hear` + `/api/speak` contracts the widget
+  already speaks. `GET /api/live/status` reports what's active.
+
+`GEMINI_LIVE_MODEL` overrides the model (default `gemini-3.8-live`).
+Local remains the default; nothing phones home unless you opt in.
+
 Multi-turn: outbound Relay messages are staged for 2 minutes — Sherry reads
 the message back and only sends on “yes”. Switchboard digests are a triage
 loop — “next”, “snooze”, “dismiss”, “stop”.
