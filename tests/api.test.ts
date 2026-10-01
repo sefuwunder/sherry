@@ -21,6 +21,7 @@ function stub(routes: Record<string, (req: Request) => Response | Promise<Respon
 
 const j = (d: any, st = 200) => new Response(JSON.stringify(d), { status: st, headers: { "content-type": "application/json" } });
 let sent: any[] = [];
+let muted: any[] = [];
 
 beforeAll(() => {
   const tmp = mkdtempSync(join(tmpdir(), "sherry-test-"));
@@ -51,10 +52,30 @@ beforeAll(() => {
   });
   const sw = stub({
     "GET /api/health": () => j({ ok: true }),
+    "GET /api/channels": () => j({
+      channels: [
+        { id: "github", mode: "instant", enabled: 1, min_priority: "low", snoozed_until: 0, meta: { label: "GitHub" } },
+      ],
+    }),
+    "GET /api/settings": () => j({
+      settings: { quiet_enabled: "0", quiet_start: "22:00", quiet_end: "07:00", urgent_breaks_quiet: "1" },
+    }),
     "GET /api/notifications": () => j({
-      notifications: [{ id: 3, title: "Deploy done", body: "", channel: "github", status: "new", created_at: 1 }],
+      notifications: [
+        { id: 3, title: "Deploy done", body: "", channel_id: "github", priority: "normal", status: "new", created_at: 1000 },
+        { id: 4, title: "PR merged", body: "", channel_id: "github", priority: "normal", status: "new", created_at: 2000 },
+        { id: 5, title: "Server down", body: "prod", channel_id: "github", priority: "urgent", status: "new", created_at: 3000 },
+      ],
     }),
     "POST /api/notifications/3/snooze": () => j({ notification: { id: 3 } }),
+    "POST /api/notifications/4/snooze": () => j({ notification: { id: 4 } }),
+    "POST /api/notifications/4/dismiss": () => j({ notification: { id: 4 } }),
+    "POST /api/notifications/5/dismiss": () => j({ notification: { id: 5 } }),
+    "POST /api/channels/github/snooze": async (req) => {
+      const b: any = await req.json();
+      muted.push(b);
+      return j({ channel: { id: "github" } });
+    },
   });
 
   process.env.BRIEFING_URL = briefing;
@@ -123,20 +144,89 @@ describe("/api/ask pipeline", () => {
     expect(d.speech).toMatch(/Nothing waiting/);
   });
 
-  test("digest then snooze that", async () => {
-    const d: any = await ask("what's new");
-    expect(d.intent).toBe("digest");
-    expect(d.speech).toMatch(/Deploy done/);
-    const s: any = await ask("snooze that for 10 minutes");
-    expect(s.intent).toBe("snooze");
-    expect(s.speech).toMatch(/Snoozed "Deploy done" for 10 minutes/);
-  });
-
-  test("snooze with no context asks for digest first", async () => {
+  test("digest opens triage; next/snooze/dismiss walk it", async () => {
     const { __resetConversationForTests } = await import("../src/app");
     __resetConversationForTests();
+    const d: any = await ask("what's new");
+    expect(d.intent).toBe("digest");
+    expect(d.speech).toMatch(/3 notifications/);
+    expect(d.speech).toMatch(/1 of 3/);
+    expect(d.speech).toMatch(/Deploy done/);
+    expect(d.speech).toMatch(/next, snooze, or dismiss/);
+
+    const n: any = await ask("next");
+    expect(n.intent).toBe("triage_next");
+    expect(n.speech).toMatch(/2 of 3/);
+    expect(n.speech).toMatch(/PR merged/);
+
+    const s: any = await ask("snooze that for 10 minutes");
+    expect(s.intent).toBe("snooze");
+    expect(s.speech).toMatch(/Snoozed GitHub — "PR merged" for 10 minutes/);
+    expect(s.speech).toMatch(/3 of 3/);
+    expect(s.speech).toMatch(/Server down/);
+
+    const x: any = await ask("dismiss");
+    expect(x.intent).toBe("dismiss");
+    expect(x.speech).toMatch(/Dismissed GitHub — "Server down"/);
+    expect(x.speech).toMatch(/That's all of them/);
+
+    // triage exhausted: next now asks for a fresh digest
+    const n2: any = await ask("next");
+    expect(n2.speech).toMatch(/No digest open/);
+  });
+
+  test("stop exits triage; snooze with no context asks first", async () => {
+    const { __resetConversationForTests } = await import("../src/app");
+    __resetConversationForTests();
+    await ask("what's new");
+    const done: any = await ask("stop");
+    expect(done.speech).toMatch(/Done with notifications/);
     const d: any = await ask("snooze that");
-    expect(d.speech).toMatch(/Ask me what's new first/);
+    expect(d.speech).toMatch(/Say what's new first/);
+  });
+
+  test("mute / unmute channel by voice", async () => {
+    const { __resetConversationForTests } = await import("../src/app");
+    __resetConversationForTests();
+    muted = [];
+    const m: any = await ask("mute github for 2 hours");
+    expect(m.intent).toBe("mute_channel");
+    expect(m.speech).toMatch(/Muted GitHub for 2 hours/);
+    expect(muted).toHaveLength(1);
+    expect(muted[0].minutes).toBe(120);
+    const u: any = await ask("unmute github");
+    expect(u.intent).toBe("unmute_channel");
+    expect(u.speech).toMatch(/Unmuted GitHub/);
+    expect(muted[1].clear).toBe(true);
+    const bad: any = await ask("mute nope");
+    expect(bad.speech).toMatch(/don't know/);
+  });
+
+  test("what was that reads the last chime", async () => {
+    const { __resetConversationForTests, __setLastChimedForTests } = await import("../src/app");
+    __resetConversationForTests();
+    const q: any = await ask("what was that");
+    expect(q.intent).toBe("what_was_that");
+    expect(q.speech).toMatch(/Nothing chimed/);
+    __setLastChimedForTests([{ id: 5, title: "Server down", channelLabel: "GitHub" }]);
+    const q2: any = await ask("what was that");
+    expect(q2.speech).toMatch(/That was: GitHub — Server down/);
+  });
+
+  test("urgent watcher chimes once for new urgents, then goes quiet", async () => {
+    const { __resetConversationForTests, __syncUrgentForTests } = await import("../src/app");
+    __resetConversationForTests();
+    // silent initial sync marks the current urgent seen without chiming
+    expect(await __syncUrgentForTests(true)).toBe(false);
+    // nothing new since -> no chime
+    expect(await __syncUrgentForTests(false)).toBe(false);
+    // fresh watermark -> the existing urgent is "new" -> chimes once
+    __resetConversationForTests();
+    expect(await __syncUrgentForTests(false)).toBe(true);
+    const q: any = await ask("what was that");
+    expect(q.speech).toMatch(/That was: GitHub — Server down/);
+    // second pass: watermark advanced -> silent
+    expect(await __syncUrgentForTests(false)).toBe(false);
   });
 
   test("help + unknown", async () => {

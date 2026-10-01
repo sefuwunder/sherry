@@ -56,6 +56,7 @@ function defaultPrompt() {
 }
 
 function addTurn(heard, said, intent) {
+  $("urgent-dot").hidden = true; // acknowledged by engaging
   const li = document.createElement("li");
   li.className = "turn";
   const h = document.createElement("p");
@@ -195,6 +196,49 @@ window.addEventListener("keyup", (e) => {
   }
 });
 
+// --- urgent chime: two low soft tones in succession ---
+// Fired by the server over SSE when Switchboard reports a new urgent item.
+// No spoken content — the user asks "what was that?" to hear it.
+let chimeCtx = null;
+function chime() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    chimeCtx = chimeCtx || new AC();
+    if (chimeCtx.state === "suspended") chimeCtx.resume();
+    const t0 = chimeCtx.currentTime + 0.05;
+    for (let i = 0; i < 2; i++) {
+      const osc = chimeCtx.createOscillator();
+      const gain = chimeCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 330; // low E — soft, unobtrusive
+      const start = t0 + i * 0.5;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.linearRampToValueAtTime(0.16, start + 0.07); // gentle attack
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.42); // soft decay
+      osc.connect(gain);
+      gain.connect(chimeCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.46);
+    }
+  } catch (e) { /* audio unavailable — the dot still shows */ }
+  $("urgent-dot").hidden = false;
+}
+
+function watchEvents() {
+  let es;
+  try {
+    es = new EventSource("/api/events");
+  } catch (e) {
+    return;
+  }
+  es.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    if (msg.type === "urgent") chime();
+  };
+  // onerror: the browser reconnects automatically; nothing to do.
+}
+
 // --- integrations status ---
 
 async function refreshIntegrations() {
@@ -236,6 +280,7 @@ async function boot() {
   } catch { /* ignore */ }
   refreshIntegrations();
   setInterval(refreshIntegrations, 30000);
+  watchEvents();
 }
 
 // --- type-instead fallback ---

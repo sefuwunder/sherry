@@ -43,6 +43,17 @@ body {
   background: var(--accent);
   box-shadow: 0 0 12px rgba(201, 111, 74, 0.7);
 }
+.urgent-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #e0a458;
+  box-shadow: 0 0 10px rgba(224, 164, 88, 0.9);
+  animation: urgent-pulse 1.6s ease-in-out infinite;
+}
+.urgent-dot[hidden] { display: none; }
+@keyframes urgent-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
 .integrations { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip {
   font-size: 12px;

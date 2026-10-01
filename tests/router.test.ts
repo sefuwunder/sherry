@@ -70,6 +70,40 @@ describe("router", () => {
     expect(route("tell me a joke about elephants").intent).toBe("unknown");
   });
 
+  test("triage_next", () => {
+    expect(route("next").intent).toBe("triage_next");
+    expect(route("skip").intent).toBe("triage_next");
+  });
+
+  test("what_was_that", () => {
+    for (const t of ["what was that", "what's that", "what was the chime", "the chime"]) {
+      expect(route(t).intent).toBe("what_was_that");
+    }
+  });
+
+  test("mute / unmute channel", () => {
+    const m1 = route("mute github");
+    expect(m1.intent).toBe("mute_channel");
+    expect(m1.slots.channel).toBe("github");
+    expect(m1.slots.duration).toBe("");
+    const m2 = route("mute github for 2 hours");
+    expect(m2.slots.duration).toBe("2 hours");
+    expect(route("mute github for today").slots.duration).toBe("today");
+    const u = route("unmute github");
+    expect(u.intent).toBe("unmute_channel");
+    expect(u.slots.channel).toBe("github");
+  });
+
+  test("cancel covers triage exits", () => {
+    expect(route("done").intent).toBe("cancel");
+    expect(route("that's all").intent).toBe("cancel");
+  });
+
+  test("mute doesn't swallow digest", () => {
+    expect(route("what's new").intent).toBe("digest");
+    expect(route("mute github").intent).toBe("mute_channel");
+  });
+
   test("opener stripped", () => {
     expect(route("hey sherry, brief me").intent).toBe("brief");
     expect(route("sherry what's new").intent).toBe("digest");

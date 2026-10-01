@@ -220,31 +220,171 @@ export interface SwNotification {
   id: number;
   title: string;
   body: string;
-  channel: string;
+  channel_id: string;
+  channel?: string; // legacy alias some builds return
   priority?: string;
   status: string;
   created_at: number;
 }
 
-export async function digest(): Promise<{ speech: string; ok: boolean; mentioned: Array<{ id: number; title: string }> }> {
+export interface SwChannel {
+  id: string;
+  label?: string;
+  mode: string; // instant | digest | muted
+  enabled: number;
+  min_priority: string;
+  snoozed_until: number;
+}
+
+function notifChannel(n: SwNotification): string {
+  return n.channel_id || n.channel || "";
+}
+
+export async function getChannels(): Promise<{ ok: boolean; channels: SwChannel[]; error?: string }> {
   const b = bases();
-  const r = await get(b.switchboard, "/api/notifications?limit=10");
-  if (!r.ok) return { ok: false, speech: "I can't reach Switchboard. Is it running?", mentioned: [] };
-  const all: SwNotification[] = r.data?.notifications || [];
-  const live = all.filter((n) => n.status !== "dismissed" && n.status !== "snoozed").slice(0, 5);
-  if (!live.length) return { ok: true, speech: "Nothing new. All quiet.", mentioned: [] };
-  const mentioned = live.map((n) => ({ id: n.id, title: String(n.title || "notification") }));
-  const bits = live.map((n, i) => {
-    const chan = n.channel ? `${n.channel}: ` : "";
-    const body = String(n.body || "").slice(0, 100);
-    return `${i + 1}: ${chan}${n.title}${body ? ` — ${body}` : ""}`;
-  });
-  const head = live.length === 1 ? "One notification." : `${live.length} notifications.`;
+  const r = await get(b.switchboard, "/api/channels");
+  if (!r.ok) return { ok: false, channels: [], error: "I can't reach Switchboard. Is it running?" };
+  const list: any[] = r.data?.channels || [];
   return {
     ok: true,
-    speech: head + " " + bits.join(". ") + ". Say snooze that, or dismiss that.",
-    mentioned,
+    channels: list.map((c) => ({
+      id: String(c.id || ""),
+      label: c.meta?.label || c.label,
+      mode: String(c.mode || "instant"),
+      enabled: Number(c.enabled ?? 1),
+      min_priority: String(c.min_priority || "low"),
+      snoozed_until: Number(c.snoozed_until || 0),
+    })),
   };
+}
+
+export async function findChannel(name: string): Promise<{ ok: boolean; channel?: SwChannel; error?: string }> {
+  const r = await getChannels();
+  if (!r.ok) return { ok: false, error: r.error };
+  const q = name.toLowerCase().trim();
+  const hit = r.channels.find((c) => c.id.toLowerCase() === q)
+    || r.channels.find((c) => (c.label || "").toLowerCase() === q)
+    || r.channels.find((c) => c.id.toLowerCase().includes(q) || (c.label || "").toLowerCase().includes(q));
+  if (!hit) return { ok: false, error: `I don't know a ${name} channel.` };
+  return { ok: true, channel: hit };
+}
+
+/** Mute a channel for `minutes` (1..1440). */
+export async function muteChannel(id: string, minutes: number): Promise<{ ok: boolean; error?: string }> {
+  const b = bases();
+  const r = await post(b.switchboard, `/api/channels/${encodeURIComponent(id)}/snooze`, {
+    minutes: Math.max(1, Math.min(1440, Math.round(minutes))),
+  });
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+export async function unmuteChannel(id: string): Promise<{ ok: boolean; error?: string }> {
+  const b = bases();
+  const r = await post(b.switchboard, `/api/channels/${encodeURIComponent(id)}/snooze`, { clear: true });
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+export interface QuietState {
+  reachable: boolean;
+  enabled: boolean;
+  inQuiet: boolean;
+  urgentBreaks: boolean;
+}
+
+/** Read Switchboard's quiet-hours settings and evaluate them for right now
+ *  (server-local time; both apps run on the same machine). */
+export async function getQuietState(now = Date.now()): Promise<QuietState> {
+  const b = bases();
+  const r = await get(b.switchboard, "/api/settings");
+  if (!r.ok) return { reachable: false, enabled: false, inQuiet: false, urgentBreaks: true };
+  const s: Record<string, string> = r.data?.settings || {};
+  const enabled = s.quiet_enabled === "1";
+  const urgentBreaks = s.urgent_breaks_quiet !== "0";
+  let inQuiet = false;
+  if (enabled) {
+    const d = new Date(now);
+    const mins = d.getHours() * 60 + d.getMinutes();
+    const parse = (v: string) => {
+      const m = /^(\d{2}):(\d{2})$/.exec(v || "");
+      return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+    };
+    const start = parse(s.quiet_start || ""), end = parse(s.quiet_end || "");
+    if (start != null && end != null) {
+      inQuiet = start <= end ? (mins >= start && mins < end) : (mins >= start || mins < end);
+    }
+  }
+  return { reachable: true, enabled, inQuiet, urgentBreaks };
+}
+
+/** Urgent notifications newer than `since` (created_at ms), live only.
+ *  Mirrors Switchboard's own semantics: priority "urgent" bypasses channel mode. */
+export async function urgentSince(since: number): Promise<SwNotification[]> {
+  const b = bases();
+  const r = await get(b.switchboard, "/api/notifications?limit=20");
+  if (!r.ok) return [];
+  const all: SwNotification[] = r.data?.notifications || [];
+  return all
+    .filter((n) => (n.priority || "normal") === "urgent")
+    .filter((n) => n.status !== "dismissed" && n.status !== "snoozed")
+    .filter((n) => Number(n.created_at || 0) > since)
+    .sort((a, b) => Number(a.created_at) - Number(b.created_at));
+}
+
+export interface DigestItem {
+  id: number;
+  title: string;
+  body: string;
+  channel: string;
+  channelLabel: string;
+}
+
+export interface DigestResult {
+  ok: boolean;
+  items: DigestItem[];
+  quietHours: boolean; // true when quiet hours filtered the list to urgent-only
+  error?: string;
+}
+
+/** Items for the spoken triage digest. Respects channel routing (muted /
+ *  disabled / snoozed channels are excluded) and quiet hours (urgent-only
+ *  when urgent breaks through; empty otherwise). */
+export async function digestItems(): Promise<DigestResult> {
+  const b = bases();
+  const [chR, qR, nR] = await Promise.all([
+    getChannels(),
+    getQuietState(),
+    get(b.switchboard, "/api/notifications?limit=10"),
+  ]);
+  if (!nR.ok) return { ok: false, items: [], quietHours: false, error: "I can't reach Switchboard. Is it running?" };
+  const now = Date.now();
+  const labels = new Map<string, string>();
+  const hidden = new Set<string>();
+  if (chR.ok) {
+    for (const c of chR.channels) {
+      if (c.label) labels.set(c.id, c.label);
+      if (c.mode === "muted" || !c.enabled || c.snoozed_until > now) hidden.add(c.id);
+    }
+  }
+  const quietOnlyUrgent = qR.reachable && qR.inQuiet && qR.urgentBreaks;
+  const quietSilent = qR.reachable && qR.inQuiet && !qR.urgentBreaks;
+  const all: SwNotification[] = nR.data?.notifications || [];
+  const items = all
+    .filter((n) => n.status !== "dismissed" && n.status !== "snoozed")
+    .filter((n) => !hidden.has(notifChannel(n)))
+    .filter((n) => !quietSilent)
+    .filter((n) => !quietOnlyUrgent || (n.priority || "normal") === "urgent")
+    .slice(0, 5)
+    .map((n) => {
+      const cid = notifChannel(n);
+      return {
+        id: n.id,
+        title: String(n.title || "notification"),
+        body: String(n.body || "").slice(0, 100),
+        channel: cid,
+        channelLabel: labels.get(cid) || cid,
+      };
+    });
+  return { ok: true, items, quietHours: quietOnlyUrgent || quietSilent };
 }
 
 export async function snoozeNotification(id: number, minutes: number): Promise<{ ok: boolean; error?: string }> {

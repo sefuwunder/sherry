@@ -53,14 +53,31 @@ beforeAll(() => {
   });
   B.switchboard = stub({
     "GET /api/health": () => j({ ok: true }),
+    "GET /api/channels": () => j({
+      channels: [
+        { id: "github", mode: "instant", enabled: 1, min_priority: "low", snoozed_until: 0, meta: { label: "GitHub" } },
+        { id: "news", mode: "muted", enabled: 1, min_priority: "low", snoozed_until: 0, meta: { label: "News" } },
+        { id: "cal", mode: "instant", enabled: 1, min_priority: "low", snoozed_until: Date.now() + 3600000, meta: { label: "Calendar" } },
+      ],
+    }),
+    "GET /api/settings": () => j({
+      settings: { quiet_enabled: "1", quiet_start: "22:00", quiet_end: "07:00", urgent_breaks_quiet: "1" },
+    }),
     "GET /api/notifications": () => j({
       notifications: [
-        { id: 7, title: "Build failed", body: "ci red", channel: "github", status: "new", created_at: 1 },
-        { id: 8, title: "Old news", body: "", channel: "news", status: "dismissed", created_at: 1 },
+        { id: 7, title: "Build failed", body: "ci red", channel_id: "github", priority: "high", status: "new", created_at: 1000 },
+        { id: 8, title: "Old news", body: "", channel_id: "news", priority: "normal", status: "new", created_at: 2000 },
+        { id: 9, title: "Meeting soon", body: "", channel_id: "cal", priority: "urgent", status: "new", created_at: 3000 },
+        { id: 10, title: "Server down", body: "prod", channel_id: "github", priority: "urgent", status: "new", created_at: 4000 },
+        { id: 11, title: "Gone", body: "", channel_id: "github", priority: "normal", status: "dismissed", created_at: 5000 },
       ],
     }),
     "POST /api/notifications/7/snooze": () => j({ notification: { id: 7, status: "snoozed" } }),
     "POST /api/notifications/7/dismiss": () => j({ notification: { id: 7, status: "dismissed" } }),
+    "POST /api/channels/github/snooze": async (req) => {
+      const b: any = await req.json();
+      return j({ channel: { id: "github", snoozed: b.clear ? false : true, minutes: b.minutes } });
+    },
   });
 
   process.env.BRIEFING_URL = B.briefing;
@@ -120,14 +137,50 @@ describe("clients", () => {
     expect(u.speech).toMatch(/2 from Shy/);
   });
 
-  test("switchboard: digest skips dismissed, snooze/dismiss work", async () => {
-    const d = await C.digest();
+  test("switchboard: digestItems respects routing, skips dismissed", async () => {
+    const d = await C.digestItems();
     expect(d.ok).toBe(true);
-    expect(d.speech).toMatch(/Build failed/);
-    expect(d.speech).not.toMatch(/Old news/);
-    expect(d.mentioned[0].id).toBe(7);
+    // github:Build failed survives; news:Old news is muted-channel; cal:Meeting soon
+    // is channel-snoozed; id 11 dismissed. Urgent Server down survives.
+    const titles = d.items.map((i) => i.title);
+    expect(titles).toContain("Build failed");
+    expect(titles).toContain("Server down");
+    expect(titles).not.toContain("Old news");
+    expect(titles).not.toContain("Meeting soon");
+    expect(titles).not.toContain("Gone");
+    expect(d.items[0].channelLabel).toBe("GitHub");
     expect((await C.snoozeNotification(7, 30)).ok).toBe(true);
     expect((await C.dismissNotification(7)).ok).toBe(true);
+  });
+
+  test("switchboard: quiet hours filter to urgent-only", async () => {
+    // 23:30 local is inside 22:00-07:00 quiet hours; stub a clock via query is
+    // overkill — call getQuietState with an explicit timestamp instead.
+    const q = await C.getQuietState(new Date(2026, 9, 1, 23, 30).getTime());
+    expect(q.reachable).toBe(true);
+    expect(q.inQuiet).toBe(true);
+    expect(q.urgentBreaks).toBe(true);
+    const day = await C.getQuietState(new Date(2026, 9, 1, 12, 0).getTime());
+    expect(day.inQuiet).toBe(false);
+  });
+
+  test("switchboard: channels find/mute/unmute", async () => {
+    const f = await C.findChannel("github");
+    expect(f.ok).toBe(true);
+    expect(f.channel!.id).toBe("github");
+    expect(f.channel!.label).toBe("GitHub");
+    const byLabel = await C.findChannel("GitHub");
+    expect(byLabel.channel!.id).toBe("github");
+    expect((await C.findChannel("nope")).ok).toBe(false);
+    expect((await C.muteChannel("github", 120)).ok).toBe(true);
+    expect((await C.unmuteChannel("github")).ok).toBe(true);
+  });
+
+  test("switchboard: urgentSince returns only new urgents", async () => {
+    const u = await C.urgentSince(0);
+    expect(u.map((n) => n.id).sort((a, b) => a - b)).toEqual([9, 10]);
+    const none = await C.urgentSince(4000);
+    expect(none).toHaveLength(0);
   });
 
   test("unreachable app degrades gracefully", async () => {

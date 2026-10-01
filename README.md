@@ -12,8 +12,27 @@ routes the command deterministically, and speaks the answer back.
 | “add task buy milk to Groceries” | Ascent — creates the task |
 | “message Shy I'll be late” | Relay — stages the message, reads it back, **“yes” sends** |
 | “any new messages” | Relay — unread conversations |
-| “what's new” | Switchboard — spoken digest of live notifications |
-| “snooze that” / “dismiss that” | Switchboard — modulates the last-mentioned notification |
+| “what's new” | Switchboard — spoken triage digest (see below) |
+| “mute GitHub for today” / “unmute GitHub” | Switchboard — channel-level mute |
+
+### Switchboard: the honest integration
+
+Sherry consumes Switchboard's attention model instead of reimplementing it:
+
+- **Triage loop, not a monologue.** "What's new" opens a digest and reads items
+  one at a time — say **next**, **snooze** (optionally "for 10 minutes"),
+  **dismiss**, or **stop** per item.
+- **Routing-aware.** Muted, disabled, and channel-snoozed channels are excluded,
+  so the spoken digest agrees with the dashboard on what "new" means.
+- **Quiet-hours-aware.** During Switchboard's quiet hours only urgent items
+  surface (when urgent breaks through); otherwise she says it's quiet hours
+  and stays quiet. No backdoor around your own attention policy.
+- **Urgent chime.** A background watcher polls Switchboard; a *new* urgent
+  notification plays **two low soft tones** in the browser — no spoken content.
+  Ask **"what was that?"** to hear it. The chime fires once per item, never
+  repeats, and stays silent during quiet hours unless urgent breaks through.
+- **Channel-level voice commands.** "Mute GitHub for today" / "for 2 hours" /
+  "unmute GitHub" — broad strokes are what voice is good at.
 
 ## Run
 
@@ -50,8 +69,8 @@ Base URLs, localhost defaults, override with env:
    and the browser reads it aloud (barge-in: grabbing the mic cancels speech).
 
 Multi-turn: outbound Relay messages are staged for 2 minutes — Sherry reads
-the message back and only sends on “yes”. Switchboard “snooze that” /
-“dismiss that” act on the notification Sherry just mentioned.
+the message back and only sends on “yes”. Switchboard digests are a triage
+loop — “next”, “snooze”, “dismiss”, “stop”.
 
 ## Design rules
 

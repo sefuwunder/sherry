@@ -10,8 +10,12 @@ export type IntentName =
   | "cancel"
   | "new_messages"
   | "digest"
+  | "triage_next"
   | "snooze"
   | "dismiss"
+  | "mute_channel"
+  | "unmute_channel"
+  | "what_was_that"
   | "help"
   | "unknown";
 
@@ -35,10 +39,11 @@ export function route(raw: string): Route {
   const t = stripOpener(norm(raw));
 
   // --- confirm / cancel first: single-word utterances must win ---
+  // "stop"/"done" double as triage exit (context resolved in app.ts).
   if (/^(yes|yeah|yep|yup|sure|send it|do it|confirm|go ahead)$/.test(t)) {
     return { intent: "confirm", slots: {} };
   }
-  if (/^(no|nope|cancel|never mind|nevermind|forget it|stop)$/.test(t)) {
+  if (/^(no|nope|cancel|never mind|nevermind|forget it|stop|done|that's all|thats all)$/.test(t)) {
     return { intent: "cancel", slots: {} };
   }
 
@@ -76,6 +81,25 @@ export function route(raw: string): Route {
     return { intent: "new_messages", slots: {} };
   }
 
+  // --- switchboard: triage navigation ("next" while a digest is open) ---
+  if (/^(next|skip)$/.test(t)) {
+    return { intent: "triage_next", slots: {} };
+  }
+
+  // --- switchboard: what was the chime? (after an urgent tone pair) ---
+  if (/\bwhat was that\b|\bwhat'?s (that|the chime)\b|\bthe chime\b|\bwhat was the tone\b/.test(t)) {
+    return { intent: "what_was_that", slots: {} };
+  }
+
+  // --- switchboard: channel mute / unmute ---
+  // "mute github" / "mute github for 2 hours" / "mute github for today" / "unmute github"
+  m = t.match(/^unmute ([a-z0-9][a-z0-9 _-]*)$/);
+  if (m) return { intent: "unmute_channel", slots: { channel: m[1].trim() } };
+  m = t.match(/^mute ([a-z0-9][a-z0-9 _-]*?)(?: for (today|\d+ ?(?:minute|hour)s?))?$/);
+  if (m) {
+    return { intent: "mute_channel", slots: { channel: m[1].trim(), duration: (m[2] || "").trim() } };
+  }
+
   // --- switchboard: digest ---
   if (/\b(what'?s new|anything urgent|notifications?|alerts?)\b/.test(t)) {
     return { intent: "digest", slots: {} };
@@ -103,4 +127,5 @@ export function route(raw: string): Route {
 /** Spoken help text, kept short for TTS. */
 export const HELP_SPEECH =
   "You can say: brief me. What's on my plate. Add task buy milk. " +
-  "Message Shy I'll be late. Any new messages. What's new. Snooze that. Or dismiss that.";
+  "Message Shy I'll be late. Any new messages. What's new — then next, snooze, or dismiss. " +
+  "Mute GitHub for today. Or unmute GitHub.";

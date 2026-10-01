@@ -1,5 +1,5 @@
 // sherry: voice-first desktop agent. Bun + zero deps + SQLite.
-import { handle } from "./app";
+import { handle, startUrgentWatcher } from "./app";
 
 const PORT = Number(process.env.PORT || 3014);
 
@@ -18,3 +18,6 @@ const server = Bun.serve({
 });
 
 console.log(`sherry listening on http://127.0.0.1:${server.port}`);
+
+// Watch Switchboard for urgent items; chime the browser via SSE.
+startUrgentWatcher();
