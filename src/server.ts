@@ -1,5 +1,5 @@
 // sherry: voice-first desktop agent. Bun + zero deps + SQLite.
-import { handle, startUrgentWatcher, startReminderWatcher } from "./app";
+import { handle, startUrgentWatcher, startReminderWatcher, startLoomWatcher } from "./app";
 
 const PORT = Number(process.env.PORT || 3014);
 
@@ -24,3 +24,6 @@ startUrgentWatcher();
 
 // Fire due reminders/timers; the widget speaks them via SSE.
 startReminderWatcher();
+
+// Announce loom thought completions via SSE.
+startLoomWatcher();

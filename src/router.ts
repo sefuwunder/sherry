@@ -33,6 +33,8 @@ export type IntentName =
   | "reminders_list"
   | "reminder_cancel"
   | "note"
+  | "think"
+  | "thoughts"
   | "help"
   | "unknown";
 
@@ -228,6 +230,16 @@ export function route(raw: string): Route {
     if (m && m[1].trim().length >= 2) return { intent: "note", slots: { body: m[1].trim() } };
   }
 
+  // --- sherry ↔ loom: durable thinking ---
+  // "think about the best pricing model" / "what did loom conclude"
+  if (/\b(what did loom conclude|check loom|any thoughts|what are you thinking about|loom status)\b/.test(t)) {
+    return { intent: "thoughts", slots: {} };
+  }
+  {
+    const m = t.match(/^(?:think about|loom[,:]?\s*think(?: about)?|ponder|figure out|chew on)\s+(.+)$/);
+    if (m && m[1].trim().length >= 3) return { intent: "think", slots: { goal: m[1].trim() } };
+  }
+
   // --- help ---
   if (/\b(help|what can you do|commands)\b/.test(t)) {
     return { intent: "help", slots: {} };
@@ -245,10 +257,10 @@ export function route(raw: string): Route {
 /** Spoken help text, kept short for TTS. Covers every intent. */
 export const HELP_SPEECH =
   "Brief me, what should I do, relationship report. " +
+  "Think about pricing, what did loom conclude. " +
   "Calendar: what's on my calendar, when's my next meeting. " +
-  "Remind me in 20 minutes to call, set a timer for 10 minutes. " +
-  "Note: brilliant idea. " +
-  "Ascent: what's on my plate, add task buy milk. " +
+  "Remind me in 20, set a timer, note: idea. " +
+  "Ascent: what's on my plate, add task milk. " +
   "Relay: message Shy I'll be late, yes to send. " +
   "Switchboard: what's new, next, snooze, dismiss, mute GitHub. " +
   "Longview: research electric cars, what did you find";

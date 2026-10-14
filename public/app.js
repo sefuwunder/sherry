@@ -280,6 +280,10 @@ function watchEvents() {
       showTurn("⏰", String(msg.text));
       speak(String(msg.text));
     }
+    if (msg.type === "loom" && msg.text) {
+      showTurn("🧠", String(msg.text));
+      speak(String(msg.text));
+    }
   };
   // onerror: the browser reconnects automatically; nothing to do.
 }

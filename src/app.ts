@@ -25,6 +25,7 @@ import { calendarToday, calendarTomorrow, calendarNext } from "./calendar";
 import {
   parseTimeSpec, addReminder, popDue, listPending, cancelAll, fmtWhen,
 } from "./remind";
+import { submitThought, loomSummary, peekOutbox, markOutboxDelivered, jobResult } from "./loom";
 import { recordActed, learnedSpeech } from "./jev";
 import {
   integrationStatus, composeBrief, myDay, addTask,
@@ -140,6 +141,28 @@ export function startReminderWatcher(intervalMs = 10_000): void {
 export function __fireDueRemindersForTests(): string[] {
   return popDue().map((r) =>
     r.kind === "timer" ? `Timer done${r.text && r.text !== "Timer" ? `: ${r.text}` : ""}.` : `Reminder: ${r.text}.`);
+}
+
+let loomTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Watch loom's outbox; announce completions over SSE (short notice — the
+ *  user asks "what did loom conclude" for the full text). Not started in
+ *  tests — server.ts starts it. */
+export function startLoomWatcher(intervalMs = 30_000): void {
+  if (loomTimer) return;
+  loomTimer = setInterval(() => {
+    try {
+      const notices = peekOutbox();
+      if (!notices.length) return;
+      // Peek only — delivery (marking read) happens when the user asks.
+      const kinds = notices.map((n) => n.kind).filter(Boolean);
+      const label = kinds[0] || "thought";
+      const text = notices.length === 1
+        ? `Loom finished a ${label}. Say "what did loom conclude" to hear it.`
+        : `Loom finished ${notices.length} thoughts. Say "what did loom conclude" to hear them.`;
+      broadcast({ type: "loom", text, time: Date.now() });
+    } catch { /* loom db hiccup — try next tick */ }
+  }, intervalMs);
 }
 
 async function syncUrgent(silent: boolean): Promise<boolean> {
@@ -404,6 +427,31 @@ async function actSingle(r: Route): Promise<ActionResult> {
       const { saveNote } = await import("./clients");
       const saved = await saveNote(String(r.slots.body || ""));
       return saved.ok ? { speech: "Noted." } : { speech: "I couldn't reach Abba. Is it running?" };
+    }
+    case "think": {
+      const goal = String(r.slots.goal || "");
+      const sub = await submitThought(goal);
+      if (!sub.ok) {
+        return { speech: "I couldn't hand that to Loom. Is it installed?" };
+      }
+      return { speech: `I'll think about that. I'll let you know when I have something.` };
+    }
+    case "thoughts": {
+      const notices = peekOutbox();
+      if (notices.length) {
+        // Speak the finished thoughts, then mark delivered.
+        const bits: string[] = [];
+        for (const n of notices.slice(0, 3)) {
+          const res = await jobResult(n.jobId);
+          const text = res.text || n.text;
+          bits.push(text ? text.slice(0, 280) : "It finished, but I couldn't read the conclusion.");
+        }
+        markOutboxDelivered(notices.map((n) => n.id));
+        const more = notices.length > 3 ? ` Plus ${notices.length - 3} more finished.` : "";
+        return { speech: bits.join(" ") + more };
+      }
+      const summary = await loomSummary();
+      return { speech: summary };
     }
     case "myday": {
       const { speech } = await myDay();

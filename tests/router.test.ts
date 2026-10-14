@@ -165,6 +165,8 @@ describe("router", () => {
       remind: "remind me",
       timer: "set a timer",
       note: "note:",
+      think: "think about",
+      thoughts: "what did loom conclude",
     };
     for (const [intent, phrase] of Object.entries(coverage)) {
       expect(help, `help missing ${intent}`).toContain(phrase);
