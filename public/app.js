@@ -276,6 +276,10 @@ function watchEvents() {
     let msg;
     try { msg = JSON.parse(ev.data); } catch (e) { return; }
     if (msg.type === "urgent") chime();
+    if (msg.type === "reminder" && msg.text) {
+      showTurn("⏰", String(msg.text));
+      speak(String(msg.text));
+    }
   };
   // onerror: the browser reconnects automatically; nothing to do.
 }

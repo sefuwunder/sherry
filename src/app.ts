@@ -22,6 +22,9 @@ import { route, splitCompound, HELP_SPEECH, type Route } from "./router";
 import { analyze } from "./suggest";
 import { analyzeRelationships } from "./relationships";
 import { calendarToday, calendarTomorrow, calendarNext } from "./calendar";
+import {
+  parseTimeSpec, addReminder, popDue, listPending, cancelAll, fmtWhen,
+} from "./remind";
 import { recordActed, learnedSpeech } from "./jev";
 import {
   integrationStatus, composeBrief, myDay, addTask,
@@ -115,6 +118,28 @@ export function startUrgentWatcher(intervalMs = 30_000): void {
 /** Test hook: run one watcher pass. Returns true if it chimed. */
 export async function __syncUrgentForTests(silent: boolean): Promise<boolean> {
   return syncUrgent(silent);
+}
+
+let reminderTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Fire due reminders over SSE so the widget speaks them. Not started in
+ *  tests — server.ts starts it alongside the urgent watcher. */
+export function startReminderWatcher(intervalMs = 10_000): void {
+  if (reminderTimer) return;
+  reminderTimer = setInterval(() => {
+    try {
+      for (const r of popDue()) {
+        const text = r.kind === "timer" ? `Timer done${r.text && r.text !== "Timer" ? `: ${r.text}` : ""}.` : `Reminder: ${r.text}.`;
+        broadcast({ type: "reminder", text, time: Date.now() });
+      }
+    } catch { /* db hiccup — try next tick */ }
+  }, intervalMs);
+}
+
+/** Test hook: fire due reminders once. Returns the fired texts. */
+export function __fireDueRemindersForTests(): string[] {
+  return popDue().map((r) =>
+    r.kind === "timer" ? `Timer done${r.text && r.text !== "Timer" ? `: ${r.text}` : ""}.` : `Reminder: ${r.text}.`);
 }
 
 async function syncUrgent(silent: boolean): Promise<boolean> {
@@ -343,6 +368,42 @@ async function actSingle(r: Route): Promise<ActionResult> {
     case "calendar_next": {
       const { speech } = await calendarNext();
       return { speech };
+    }
+    case "remind": {
+      const parsed = parseTimeSpec(String(r.slots.rest || ""));
+      if (!parsed) {
+        return { speech: "When should I remind you? Try 'in 20 minutes' or 'at 3pm'." };
+      }
+      if (!parsed.text) {
+        return { speech: "Remind you to do what? Say it after the time." };
+      }
+      const saved = addReminder(parsed.text, parsed.fireAtMs, "reminder");
+      return { speech: `I'll remind you ${fmtWhen(saved.fireAtMs)}: ${saved.text}.` };
+    }
+    case "timer": {
+      const parsed = parseTimeSpec(String(r.slots.rest || ""));
+      if (!parsed) {
+        return { speech: "For how long? Try '10 minutes' or 'an hour'." };
+      }
+      const saved = addReminder(parsed.text || "Timer", parsed.fireAtMs, "timer");
+      return { speech: `Timer set for ${fmtWhen(saved.fireAtMs)}.` };
+    }
+    case "reminders_list": {
+      const pending = listPending();
+      if (!pending.length) return { speech: "No reminders set." };
+      const bits = pending.slice(0, 5).map((r) =>
+        `${r.text} ${fmtWhen(r.fireAtMs)}`);
+      const more = pending.length > 5 ? `, plus ${pending.length - 5} more` : "";
+      return { speech: `Reminders: ${bits.join("; ")}${more}.` };
+    }
+    case "reminder_cancel": {
+      const n = cancelAll();
+      return { speech: n ? `Cancelled ${n} reminder${n === 1 ? "" : "s"}.` : "Nothing to cancel." };
+    }
+    case "note": {
+      const { saveNote } = await import("./clients");
+      const saved = await saveNote(String(r.slots.body || ""));
+      return saved.ok ? { speech: "Noted." } : { speech: "I couldn't reach Abba. Is it running?" };
     }
     case "myday": {
       const { speech } = await myDay();
@@ -660,7 +721,7 @@ export async function handle(req: Request): Promise<Response> {
       const out = await runRoutes(routes, compound);
       result = out.result;
       intent = out.intent;
-    } catch {
+    } catch (e: any) {
       result = { speech: "Something went wrong on my end. Try again." };
       intent = r.intent;
     }

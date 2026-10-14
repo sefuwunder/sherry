@@ -13,7 +13,25 @@ export function bases() {
     // NOTE: longview and idea-party both default to :3011 upstream — if you
     // run both, put one on another port and point LONGVIEW_URL at longview.
     longview: (process.env.LONGVIEW_URL || "http://127.0.0.1:3011").replace(/\/$/, ""),
+    abba: (process.env.ABBA_URL || "http://127.0.0.1:3013").replace(/\/$/, ""),
   };
+}
+
+/** Save a voice-captured note to Abba. Non-destructive; no confirmation needed. */
+export async function saveNote(body: string): Promise<{ ok: boolean; error?: string }> {
+  const b = bases();
+  try {
+    const r = await fetch(b.abba + "/api/notes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: body.slice(0, 2000), tags: ["sherry", "voice"] }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return { ok: false, error: `http_${r.status}` };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "unreachable" };
+  }
 }
 
 export async function get(base: string, path: string): Promise<{ ok: boolean; data?: any; error?: string; ms?: number }> {

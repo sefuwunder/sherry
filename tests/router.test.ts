@@ -162,6 +162,9 @@ describe("router", () => {
       relationships: "relationship report",
       calendar_today: "what's on my calendar",
       calendar_next: "when's my next meeting",
+      remind: "remind me",
+      timer: "set a timer",
+      note: "note:",
     };
     for (const [intent, phrase] of Object.entries(coverage)) {
       expect(help, `help missing ${intent}`).toContain(phrase);

@@ -1,5 +1,5 @@
 // sherry: voice-first desktop agent. Bun + zero deps + SQLite.
-import { handle, startUrgentWatcher } from "./app";
+import { handle, startUrgentWatcher, startReminderWatcher } from "./app";
 
 const PORT = Number(process.env.PORT || 3014);
 
@@ -21,3 +21,6 @@ console.log(`sherry listening on http://127.0.0.1:${server.port}`);
 
 // Watch Switchboard for urgent items; chime the browser via SSE.
 startUrgentWatcher();
+
+// Fire due reminders/timers; the widget speaks them via SSE.
+startReminderWatcher();

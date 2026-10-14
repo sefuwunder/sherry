@@ -28,6 +28,11 @@ export type IntentName =
   | "calendar_today"
   | "calendar_tomorrow"
   | "calendar_next"
+  | "remind"
+  | "timer"
+  | "reminders_list"
+  | "reminder_cancel"
+  | "note"
   | "help"
   | "unknown";
 
@@ -199,6 +204,30 @@ export function route(raw: string): Route {
     return { intent: "calendar_today", slots: {} };
   }
 
+  // --- sherry: reminders & timers ---
+  // "remind me in 20 minutes to call the bank" / "set a timer for 10 minutes"
+  if (/\bcancel\b.*\b(reminders?|timers?)\b|\b(reminders?|timers?)\b.*\bcancel\b/.test(t)) {
+    return { intent: "reminder_cancel", slots: {} };
+  }
+  if (/\b(what are my reminders?|any reminders?|list( my)? reminders?|show( my)? reminders?)\b/.test(t)) {
+    return { intent: "reminders_list", slots: {} };
+  }
+  {
+    const m = t.match(/\bremind me\b\s*(.*)$/);
+    if (m) return { intent: "remind", slots: { rest: m[1].trim() } };
+  }
+  {
+    const m = t.match(/\b(?:set\s+)?(?:a\s+)?timer\b\s*(?:for\s*)?(.*)$/);
+    if (m) return { intent: "timer", slots: { rest: m[1].trim() } };
+  }
+
+  // --- sherry: quick capture to abba ---
+  // "note: idea for the menu" / "take a note ..." / "jot down ..."
+  {
+    const m = t.match(/^(?:note|jot down|take a note|write down)\s*:?\s*(.+)$/);
+    if (m && m[1].trim().length >= 2) return { intent: "note", slots: { body: m[1].trim() } };
+  }
+
   // --- help ---
   if (/\b(help|what can you do|commands)\b/.test(t)) {
     return { intent: "help", slots: {} };
@@ -217,8 +246,9 @@ export function route(raw: string): Route {
 export const HELP_SPEECH =
   "Brief me, what should I do, relationship report. " +
   "Calendar: what's on my calendar, when's my next meeting. " +
-  "Chain: brief me and mute github. " +
+  "Remind me in 20 minutes to call, set a timer for 10 minutes. " +
+  "Note: brilliant idea. " +
   "Ascent: what's on my plate, add task buy milk. " +
   "Relay: message Shy I'll be late, yes to send. " +
   "Switchboard: what's new, next, snooze, dismiss, mute GitHub. " +
-  "Longview: research electric cars, what did you find.";
+  "Longview: research electric cars, what did you find";
