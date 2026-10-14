@@ -18,7 +18,7 @@ import {
   sttEngine,
   ttsEngine,
 } from "./live";
-import { route, HELP_SPEECH, type Route } from "./router";
+import { route, splitCompound, HELP_SPEECH, type Route } from "./router";
 import { analyze } from "./suggest";
 import { recordActed, learnedSpeech } from "./jev";
 import {
@@ -240,32 +240,79 @@ interface ActionResult {
   pending?: { kind: string; prompt: string };
 }
 
-async function act(r: Route): Promise<ActionResult> {
-  // Jev feedback loop: did the user act on something Sherry suggested?
-  // A match records positive feedback so that suggestion kind ranks higher.
-  if (lastOffered.length) {
-    for (const o of lastOffered) {
-      const m = o.match;
-      if (!m) continue;
-      if (m.type === "mute" && r.intent === "mute_channel"
-        && (r.slots.channel || "").toLowerCase().includes(m.label || "")) {
-        recordActed(o.kind);
-      } else if (m.type === "message" && r.intent === "message"
-        && (r.slots.contact || "").toLowerCase().includes(m.contact || "")) {
-        recordActed(o.kind);
-      } else if (m.type === "myday" && r.intent === "myday") {
-        recordActed(o.kind);
-      }
+/** Jev feedback loop: did the user act on something Sherry suggested?
+ *  A match records positive feedback so that suggestion kind ranks higher. */
+function checkJevFeedback(r: Route): void {
+  if (!lastOffered.length) return;
+  for (const o of lastOffered) {
+    const m = o.match;
+    if (!m) continue;
+    if (m.type === "mute" && r.intent === "mute_channel"
+      && (r.slots.channel || "").toLowerCase().includes(m.label || "")) {
+      recordActed(o.kind);
+    } else if (m.type === "message" && r.intent === "message"
+      && (r.slots.contact || "").toLowerCase().includes(m.contact || "")) {
+      recordActed(o.kind);
+    } else if (m.type === "myday" && r.intent === "myday") {
+      recordActed(o.kind);
     }
-    // Consumed: one turn of feedback per offer batch.
-    lastOffered = [];
   }
+  // Consumed: one turn of feedback per offer batch.
+  lastOffered = [];
+}
 
-  // Triage is sticky only for triage verbs; anything else closes it.
-  if (triage && !["triage_next", "snooze", "dismiss", "cancel"].includes(r.intent)) {
-    triage = null;
+/**
+ * Execute a compound command ("brief me and mute github"): each segment was
+ * already routed; run them in spoken order, joining the spoken results.
+ * A staged message keeps its confirmation prompt in place.
+ */
+async function actCompound(routes: Route[]): Promise<ActionResult> {
+  const speeches: string[] = [];
+  let pending: ActionResult["pending"];
+  for (const r of routes) {
+    checkJevFeedback(r);
+    // Triage stickiness applies per segment, in order.
+    if (triage && !["triage_next", "snooze", "dismiss", "cancel"].includes(r.intent)) {
+      triage = null;
+    }
+    const res = await actSingle(r);
+    speeches.push(res.speech);
+    if (res.pending) pending = res.pending;
   }
+  return { speech: speeches.join(" "), pending };
+}
 
+/** Route input, trying compound commands first ("brief me and mute github").
+ *  A compound is accepted only when every segment routes to a known intent;
+ *  otherwise the whole utterance is treated as a single command. */
+function routeInput(text: string): { routes: Route[]; compound: boolean } {
+  const parts = splitCompound(text);
+  if (parts) {
+    const routes = parts.map((p) => route(p));
+    if (routes.every((r) => r.intent !== "unknown")) {
+      return { routes, compound: true };
+    }
+  }
+  return { routes: [route(text)], compound: false };
+}
+
+async function runRoutes(routes: Route[], compound: boolean): Promise<{ result: ActionResult; intent: string }> {
+  let result: ActionResult;
+  if (compound) {
+    result = await actCompound(routes);
+  } else {
+    checkJevFeedback(routes[0]);
+    if (triage && !["triage_next", "snooze", "dismiss", "cancel"].includes(routes[0].intent)) {
+      triage = null;
+    }
+    result = await actSingle(routes[0]);
+  }
+  const intent = compound ? routes.map((r) => r.intent).join("+") : routes[0].intent;
+  return { result, intent };
+}
+
+/** Single-intent execution. */
+async function actSingle(r: Route): Promise<ActionResult> {
   switch (r.intent) {
     case "brief": {
       const { speech } = await composeBrief();
@@ -562,15 +609,20 @@ export async function handle(req: Request): Promise<Response> {
 
     const r = route(transcript);
     let result: ActionResult;
+    let intent: string;
     try {
-      result = await act(r);
+      const { routes, compound } = routeInput(transcript);
+      const out = await runRoutes(routes, compound);
+      result = out.result;
+      intent = out.intent;
     } catch (e: any) {
       result = { speech: "Something went wrong on my end. Try again." };
+      intent = r.intent;
     }
-    try { logHear(transcript, r.intent, result.speech); } catch { /* non-fatal */ }
+    try { logHear(transcript, intent, result.speech); } catch { /* non-fatal */ }
     return json({
       transcript,
-      intent: r.intent,
+      intent,
       speech: result.speech,
       pending: result.pending || null,
     });
@@ -584,13 +636,18 @@ export async function handle(req: Request): Promise<Response> {
     if (!text) return json({ error: "no text" }, 400);
     const r = route(text);
     let result: ActionResult;
+    let intent: string;
     try {
-      result = await act(r);
+      const { routes, compound } = routeInput(text);
+      const out = await runRoutes(routes, compound);
+      result = out.result;
+      intent = out.intent;
     } catch {
       result = { speech: "Something went wrong on my end. Try again." };
+      intent = r.intent;
     }
-    try { logHear(text, r.intent, result.speech); } catch { /* non-fatal */ }
-    return json({ transcript: text, intent: r.intent, speech: result.speech, pending: result.pending || null });
+    try { logHear(text, intent, result.speech); } catch { /* non-fatal */ }
+    return json({ transcript: text, intent, speech: result.speech, pending: result.pending || null });
   }
 
   // --- static ---

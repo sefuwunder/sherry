@@ -43,6 +43,23 @@ function stripOpener(t: string): string {
   return t.replace(/^(hey |ok )?sherry[, ]+/, "").trim();
 }
 
+/**
+ * Split a compound command on conjunctions: "brief me and mute github"
+ * -> ["brief me", "mute github"]. Returns null when no conjunction is found.
+ * Splitting is naive; the caller must verify every segment routes to a known
+ * intent, otherwise the whole utterance is treated as a single command
+ * (protects "message shy buy milk and eggs" from splitting mid-body).
+ */
+export function splitCompound(t: string): string[] | null {
+  const parts = t
+    .split(/\s+(?:and then|after that|followed by|then|and|plus)\s+|\s*,\s*|\s+&\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return null;
+  if (parts.length > 4) return null; // sanity cap
+  return parts;
+}
+
 export function route(raw: string): Route {
   const t = stripOpener(norm(raw));
 
@@ -176,6 +193,7 @@ export function route(raw: string): Route {
 /** Spoken help text, kept short for TTS. Covers every intent. */
 export const HELP_SPEECH =
   "Brief me, or what should I do. What have you learned. " +
+  "Chain commands with and: brief me and mute github. " +
   "Ascent: what's on my plate, add task buy milk to Groceries. " +
   "Relay: message Shy I'll be late, yes to send. Any new messages. " +
   "Switchboard: what's new, next, snooze, dismiss, stop. Mute GitHub, unmute GitHub. " +
