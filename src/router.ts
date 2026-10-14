@@ -1,6 +1,9 @@
 // sherry: deterministic intent router. No LLM, no network — pure function
 // from transcript text to { intent, slots }. Spoken confirmations and the
 // multi-turn pending slot live in app.ts; this module only classifies.
+// When no exact pattern matches, a fuzzy layer (./fuzzy) attempts
+// typo/paraphrase recovery before falling back to "unknown".
+import { fuzzyRoute } from "./fuzzy";
 export type IntentName =
   | "brief"
   | "myday"
@@ -160,6 +163,12 @@ export function route(raw: string): Route {
   if (/\b(help|what can you do|commands)\b/.test(t)) {
     return { intent: "help", slots: {} };
   }
+
+  // --- fuzzy fallback: typo-tolerant, paraphrase-tolerant recovery ---
+  // Only runs when no exact pattern matched. Returns "unknown" rather than
+  // misrouting when no intent clearly wins.
+  const fuzzy = fuzzyRoute(t);
+  if (fuzzy) return { intent: fuzzy.intent, slots: fuzzy.slots };
 
   return { intent: "unknown", slots: {} };
 }
