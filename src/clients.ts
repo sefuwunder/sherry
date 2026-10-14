@@ -84,11 +84,13 @@ function pickText(v: any): string {
 export async function composeBrief(): Promise<{ speech: string; ok: boolean }> {
   const b = bases();
   const city = process.env.BRIEFING_CITY || "Cincinnati";
-  const [w, news, tasks, mood] = await Promise.all([
+  const { calendarToday } = await import("./calendar");
+  const [w, news, tasks, mood, cal] = await Promise.all([
     get(b.briefing, `/api/weather?city=${encodeURIComponent(city)}`),
     get(b.briefing, `/api/news?region=caricom`),
     get(b.briefing, `/api/tasks`),
     get(b.briefing, `/api/mood`),
+    calendarToday().catch(() => ({ ok: false, speech: "", events: [] as any[] })),
   ]);
   if (!w.ok && !news.ok && !tasks.ok) {
     return { ok: false, speech: "I can't reach the Daily Briefing. Is it running?" };
@@ -114,6 +116,10 @@ export async function composeBrief(): Promise<{ speech: string; ok: boolean }> {
     if (hn != null) bits.push(`tech mood ${Number(hn) >= 0 ? "up" : "down"} ${Math.abs(Math.round(Number(hn)))}`);
     if (gr != null) bits.push(`world mood ${Number(gr) >= 0 ? "up" : "down"} ${Math.abs(Math.round(Number(gr)))}`);
     if (bits.length) parts.push("Mood: " + bits.join(", ") + ".");
+  }
+  if (cal.ok && cal.events.length) {
+    const n = cal.events.length;
+    parts.push(n === 1 ? "One meeting today." : `${n} meetings today.`);
   }
   return { ok: true, speech: parts.join(" ") || "Briefing is empty today." };
 }

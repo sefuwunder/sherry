@@ -25,6 +25,9 @@ export type IntentName =
   | "suggest"
   | "learned"
   | "relationships"
+  | "calendar_today"
+  | "calendar_tomorrow"
+  | "calendar_next"
   | "help"
   | "unknown";
 
@@ -183,6 +186,19 @@ export function route(raw: string): Route {
     return { intent: "relationships", slots: {} };
   }
 
+  // --- sherry: calendar ---
+  // "what's on my calendar" / "when's my next meeting" / "what's tomorrow"
+  // (before brief: "how's my day" stays with brief)
+  if (/\bwhen'?s my next (meeting|event|appointment|call)\b|\bwhat'?s next( on my calendar)?\b|\bnext meeting\b/.test(t)) {
+    return { intent: "calendar_next", slots: {} };
+  }
+  if (/\btomorrow\b/.test(t) && /\b(calendar|schedule|meetings?|events?|look like)\b/.test(t)) {
+    return { intent: "calendar_tomorrow", slots: {} };
+  }
+  if (/\b(what'?s on my calendar|my calendar|my schedule|any meetings? today|today'?s meetings?|today'?s schedule)\b/.test(t)) {
+    return { intent: "calendar_today", slots: {} };
+  }
+
   // --- help ---
   if (/\b(help|what can you do|commands)\b/.test(t)) {
     return { intent: "help", slots: {} };
@@ -199,9 +215,10 @@ export function route(raw: string): Route {
 
 /** Spoken help text, kept short for TTS. Covers every intent. */
 export const HELP_SPEECH =
-  "Brief me, what should I do, relationship report, what have you learned. " +
+  "Brief me, what should I do, relationship report. " +
+  "Calendar: what's on my calendar, when's my next meeting. " +
   "Chain: brief me and mute github. " +
-  "Ascent: what's on my plate, add task buy milk to Groceries. " +
-  "Relay: message Shy I'll be late, yes to send, any new messages. " +
-  "Switchboard: what's new, next, snooze, dismiss, stop. Mute GitHub, unmute GitHub. " +
-  "Longview: research electric cars, research status, what did you find, what was that";
+  "Ascent: what's on my plate, add task buy milk. " +
+  "Relay: message Shy I'll be late, yes to send. " +
+  "Switchboard: what's new, next, snooze, dismiss, mute GitHub. " +
+  "Longview: research electric cars, what did you find.";

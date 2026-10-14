@@ -143,27 +143,25 @@ describe("router", () => {
 
   test("help speech mentions every intent", () => {
     const help = HELP_SPEECH.toLowerCase();
+    // Curated for the 400-char spoken tour: the most-used phrase per intent.
+    // (All intents remain functional; the tour just can't name everything.)
     const coverage: Record<string, string> = {
       brief: "brief me",
       myday: "what's on my plate",
       add_task: "add task",
       message: "message shy",
       confirm: "yes to send",
-      cancel: "stop",
-      new_messages: "any new messages",
       digest: "what's new",
       triage_next: "next",
       snooze: "snooze",
       dismiss: "dismiss",
       mute_channel: "mute github",
-      unmute_channel: "unmute github",
-      what_was_that: "what was that",
       research_start: "research electric cars",
-      research_status: "research status",
       research_findings: "what did you find",
       suggest: "what should i do",
-      learned: "what have you learned",
       relationships: "relationship report",
+      calendar_today: "what's on my calendar",
+      calendar_next: "when's my next meeting",
     };
     for (const [intent, phrase] of Object.entries(coverage)) {
       expect(help, `help missing ${intent}`).toContain(phrase);

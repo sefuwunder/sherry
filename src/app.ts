@@ -21,6 +21,7 @@ import {
 import { route, splitCompound, HELP_SPEECH, type Route } from "./router";
 import { analyze } from "./suggest";
 import { analyzeRelationships } from "./relationships";
+import { calendarToday, calendarTomorrow, calendarNext } from "./calendar";
 import { recordActed, learnedSpeech } from "./jev";
 import {
   integrationStatus, composeBrief, myDay, addTask,
@@ -329,6 +330,18 @@ async function actSingle(r: Route): Promise<ActionResult> {
     }
     case "relationships": {
       const { speech } = await analyzeRelationships();
+      return { speech };
+    }
+    case "calendar_today": {
+      const { speech } = await calendarToday();
+      return { speech };
+    }
+    case "calendar_tomorrow": {
+      const { speech } = await calendarTomorrow();
+      return { speech };
+    }
+    case "calendar_next": {
+      const { speech } = await calendarNext();
       return { speech };
     }
     case "myday": {
