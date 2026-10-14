@@ -16,7 +16,7 @@ export function bases() {
   };
 }
 
-async function get(base: string, path: string): Promise<{ ok: boolean; data?: any; error?: string; ms?: number }> {
+export async function get(base: string, path: string): Promise<{ ok: boolean; data?: any; error?: string; ms?: number }> {
   const t0 = Date.now();
   try {
     const r = await fetch(base + path, { signal: AbortSignal.timeout(TIMEOUT) });

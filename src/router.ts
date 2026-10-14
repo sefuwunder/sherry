@@ -19,6 +19,7 @@ export type IntentName =
   | "research_start"
   | "research_status"
   | "research_findings"
+  | "suggest"
   | "help"
   | "unknown";
 
@@ -53,6 +54,11 @@ export function route(raw: string): Route {
   // --- briefing ---
   if (/\b(briefing|brief me|morning brief|how'?s my day|what'?s the news|news|headlines)\b/.test(t)) {
     return { intent: "brief", slots: {} };
+  }
+
+  // --- sherry: analyze + suggest ("what should i do", "prioritize my day") ---
+  if (/\b(suggest(ions)?|what should i do|what needs (my )?attention|prioritize|what'?s important|analyze( my day)?|any suggestions)\b/.test(t)) {
+    return { intent: "suggest", slots: {} };
   }
 
   // --- ascent: my day ---
@@ -154,9 +160,8 @@ export function route(raw: string): Route {
 
 /** Spoken help text, kept short for TTS. Covers every intent. */
 export const HELP_SPEECH =
-  "Briefing: say brief me. " +
-  "Ascent: what's on my plate. Or add task buy milk to Groceries. " +
-  "Relay: message Shy I'll be late, then yes to send. Or any new messages. " +
-  "Switchboard: what's new — then next, snooze, dismiss, or stop. Mute GitHub for today, or unmute GitHub. " +
-  "Longview: research electric cars. Research status. What did you find on tariffs. " +
-  "And after a chime, ask what was that.";
+  "Brief me, or what should I do — I check Relay, Ascent, Switchboard. " +
+  "Ascent: what's on my plate, or add task buy milk to Groceries. " +
+  "Relay: message Shy I'll be late, then yes to send, or any new messages. " +
+  "Switchboard: what's new — next, snooze, dismiss, stop. Mute GitHub, or unmute GitHub. " +
+  "Longview: research electric cars, research status, what did you find. After a chime, ask what was that.";

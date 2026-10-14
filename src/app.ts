@@ -19,6 +19,7 @@ import {
   ttsEngine,
 } from "./live";
 import { route, HELP_SPEECH, type Route } from "./router";
+import { analyze } from "./suggest";
 import {
   integrationStatus, composeBrief, myDay, addTask,
   findConversation, sendMessage, unreadMessages,
@@ -244,6 +245,10 @@ async function act(r: Route): Promise<ActionResult> {
   switch (r.intent) {
     case "brief": {
       const { speech } = await composeBrief();
+      return { speech };
+    }
+    case "suggest": {
+      const { speech } = await analyze();
       return { speech };
     }
     case "myday": {
