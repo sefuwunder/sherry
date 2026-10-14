@@ -203,6 +203,13 @@ export async function speakLive(
   const pcm = await withLiveSession(
     {
       model: modelPath(),
+      // Verbatim TTS: without this, the model treats the text as a
+      // conversational turn and summarizes/paraphrases instead of reading it.
+      systemInstruction: {
+        parts: [{
+          text: "You are a text-to-speech engine. Read the user's message aloud EXACTLY as written, word for word. Do not summarize, paraphrase, explain, answer, or add any words of your own. Speak only the text given.",
+        }],
+      },
       generationConfig: {
         responseModalities: ["AUDIO"],
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: liveVoice() } } },
