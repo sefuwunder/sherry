@@ -1,13 +1,18 @@
 // sherry: deterministic cross-app analyzer. Reads Relay, Ascent, and
-// Switchboard, then produces prioritized spoken suggestions. No LLM —
-// pure rules over the data, so every suggestion is explainable.
+// Switchboard, then produces prioritized spoken suggestions. Ranking blends
+// static urgency with the Jev engine's learned per-kind weights, so
+// suggestions the user acts on rise over time. No LLM.
 
 import { bases, get } from "./clients";
+import { kindWeight, recordShown, type SuggestKind } from "./jev";
 
 export interface Suggestion {
-  priority: number; // lower = more urgent
+  kind: SuggestKind;
+  priority: number; // lower = more urgent (static urgency)
   text: string;
   action?: string; // spoken follow-up, e.g. "say 'mute github' to quiet it"
+  /** Machine-readable match for feedback: what user command counts as acting. */
+  match?: { type: "mute"; label: string } | { type: "message"; contact: string } | { type: "myday" };
 }
 
 interface RelayConv {
@@ -52,9 +57,11 @@ export function analyzeRelay(convs: RelayConv[]): Suggestion[] {
         ? `${Math.round(ageH / 24)} day${Math.round(ageH / 24) === 1 ? "" : "s"}`
         : `${Math.round(ageH)} hours`;
       out.push({
+        kind: "waiting_reply",
         priority: 2,
         text: `${c.title} has been waiting ${when} for a reply${unread > 1 ? ` (${unread} unread)` : ""}`,
         action: `say "message ${c.title.toLowerCase()} ..." to reply`,
+        match: { type: "message", contact: c.title.toLowerCase() },
       });
     }
   }
@@ -69,13 +76,16 @@ export function analyzeAscent(myday: any): Suggestion[] {
   if (overdue.length) {
     const first = taskTitle(overdue[0]);
     out.push({
+      kind: "overdue_task",
       priority: 3,
       text: `${overdue.length} overdue task${overdue.length === 1 ? "" : "s"}. Oldest: ${first}`,
       action: `say "what's on my plate" to hear them all`,
+      match: { type: "myday" },
     });
   }
   if (today.length >= 5) {
     out.push({
+      kind: "heavy_day",
       priority: 5,
       text: `${today.length} tasks due today — that's a heavy day. Consider pushing the least urgent`,
     });
@@ -91,6 +101,7 @@ export function analyzeAscent(myday: any): Suggestion[] {
     const total = [...byProject.values()].reduce((n, x) => n + x, 0);
     if (top[1] >= 3 && top[1] / total >= 0.6) {
       out.push({
+        kind: "pile_up",
         priority: 6,
         text: `${top[1]} of your ${total} open tasks are in ${top[0]} — it might deserve a focused block`,
       });
@@ -106,6 +117,7 @@ export function analyzeSwitchboard(notifs: SwNotif[], channels: SwChannel[]): Su
   const urgent = active.filter((n) => (n.priority || "normal") === "urgent").slice(0, 3);
   for (const u of urgent) {
     out.push({
+      kind: "urgent_notif",
       priority: 1,
       text: `Urgent: ${String(u.title || "notification").slice(0, 100)}`,
     });
@@ -122,9 +134,11 @@ export function analyzeSwitchboard(notifs: SwNotif[], channels: SwChannel[]): Su
     if (count >= 6) {
       const label = labels.get(cid) || cid;
       out.push({
+        kind: "noisy_channel",
         priority: 7,
         text: `${label} sent ${count} notifications lately and none were urgent`,
         action: `say "mute ${label.toLowerCase()}" to quiet it`,
+        match: { type: "mute", label: label.toLowerCase() },
       });
       break; // one noise suggestion per run is enough
     }
@@ -150,7 +164,23 @@ function triageOrder(suggestions: Suggestion[]): Suggestion | null {
   return null;
 }
 
-export async function analyze(): Promise<{ speech: string; ok: boolean }> {
+export interface AnalyzeResult {
+  speech: string;
+  ok: boolean;
+  /** Suggestions actually spoken, for the feedback loop. */
+  offered: Array<{ kind: SuggestKind; match?: Suggestion["match"] }>;
+}
+
+/**
+ * Learned score: static urgency blended with the Jev engine's per-kind
+ * weight. Urgency dominates early (all weights start at 0.5); as evidence
+ * accumulates, kinds the user acts on rise and ignored kinds sink.
+ */
+function learnedScore(s: Suggestion): number {
+  return s.priority * (1.5 - kindWeight(s.kind));
+}
+
+export async function analyze(): Promise<AnalyzeResult> {
   const b = bases();
   const [relayR, ascentR, notifR, chanR] = await Promise.all([
     get(b.relay, "/api/conversations"),
@@ -177,13 +207,13 @@ export async function analyze(): Promise<{ speech: string; ok: boolean }> {
 
   if (!suggestions.length) {
     if (unreachable.length === 3) {
-      return { ok: false, speech: "I can't reach Relay, Ascent, or Switchboard. Are they running?" };
+      return { ok: false, speech: "I can't reach Relay, Ascent, or Switchboard. Are they running?", offered: [] };
     }
     const extra = unreachable.length ? ` (Couldn't reach ${unreachable.join(" and ")}.)` : "";
-    return { ok: true, speech: `All clear. Nothing needs your attention right now.${extra}` };
+    return { ok: true, speech: `All clear. Nothing needs your attention right now.${extra}`, offered: [] };
   }
 
-  suggestions.sort((a, z) => a.priority - z.priority);
+  suggestions.sort((a, z) => learnedScore(a) - learnedScore(z));
   const triage = triageOrder(suggestions);
   const top = suggestions.slice(0, 4);
   const lines = top.map((s) => s.text + ".");
@@ -193,5 +223,9 @@ export async function analyze(): Promise<{ speech: string; ok: boolean }> {
 
   let speech = lines.join(" ");
   if (unreachable.length) speech += ` Couldn't reach ${unreachable.join(" and ")}.`;
-  return { ok: true, speech };
+
+  // Feedback loop: record what was shown so acting on it later counts.
+  const offered = top.map((s) => ({ kind: s.kind, match: s.match }));
+  for (const o of offered) recordShown(o.kind);
+  return { ok: true, speech, offered };
 }

@@ -20,6 +20,7 @@ import {
 } from "./live";
 import { route, HELP_SPEECH, type Route } from "./router";
 import { analyze } from "./suggest";
+import { recordActed, learnedSpeech } from "./jev";
 import {
   integrationStatus, composeBrief, myDay, addTask,
   findConversation, sendMessage, unreadMessages,
@@ -69,6 +70,8 @@ let pendingSend: PendingSend | null = null;
 let triage: { items: DigestItem[]; index: number } | null = null;
 /** Last attention-worthy events, for "what was that?". detail is preformatted speech. */
 let lastChimed: Array<{ kind: "switchboard" | "research"; detail: string }> = [];
+/** Suggestions Sherry last offered, for the Jev feedback loop. */
+let lastOffered: Array<{ kind: string; match?: { type: string; label?: string; contact?: string } }> = [];
 let lastUrgentSeenAt = 0;
 let runStatuses = new Map<number, string>();
 
@@ -77,6 +80,7 @@ export function __resetConversationForTests(): void {
   pendingSend = null;
   triage = null;
   lastChimed = [];
+  lastOffered = [];
   lastUrgentSeenAt = 0;
   runStatuses = new Map();
 }
@@ -237,6 +241,26 @@ interface ActionResult {
 }
 
 async function act(r: Route): Promise<ActionResult> {
+  // Jev feedback loop: did the user act on something Sherry suggested?
+  // A match records positive feedback so that suggestion kind ranks higher.
+  if (lastOffered.length) {
+    for (const o of lastOffered) {
+      const m = o.match;
+      if (!m) continue;
+      if (m.type === "mute" && r.intent === "mute_channel"
+        && (r.slots.channel || "").toLowerCase().includes(m.label || "")) {
+        recordActed(o.kind);
+      } else if (m.type === "message" && r.intent === "message"
+        && (r.slots.contact || "").toLowerCase().includes(m.contact || "")) {
+        recordActed(o.kind);
+      } else if (m.type === "myday" && r.intent === "myday") {
+        recordActed(o.kind);
+      }
+    }
+    // Consumed: one turn of feedback per offer batch.
+    lastOffered = [];
+  }
+
   // Triage is sticky only for triage verbs; anything else closes it.
   if (triage && !["triage_next", "snooze", "dismiss", "cancel"].includes(r.intent)) {
     triage = null;
@@ -248,8 +272,12 @@ async function act(r: Route): Promise<ActionResult> {
       return { speech };
     }
     case "suggest": {
-      const { speech } = await analyze();
-      return { speech };
+      const result = await analyze();
+      lastOffered = result.offered;
+      return { speech: result.speech };
+    }
+    case "learned": {
+      return { speech: learnedSpeech() };
     }
     case "myday": {
       const { speech } = await myDay();

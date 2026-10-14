@@ -20,6 +20,7 @@ export type IntentName =
   | "research_status"
   | "research_findings"
   | "suggest"
+  | "learned"
   | "help"
   | "unknown";
 
@@ -150,6 +151,11 @@ export function route(raw: string): Route {
     return { intent: "dismiss", slots: {} };
   }
 
+  // --- sherry: what has the engine learned? ---
+  if (/\b(what have you learned|what did you learn|show (me )?what you('ve| have) learned)\b/.test(t)) {
+    return { intent: "learned", slots: {} };
+  }
+
   // --- help ---
   if (/\b(help|what can you do|commands)\b/.test(t)) {
     return { intent: "help", slots: {} };
@@ -160,8 +166,8 @@ export function route(raw: string): Route {
 
 /** Spoken help text, kept short for TTS. Covers every intent. */
 export const HELP_SPEECH =
-  "Brief me, or what should I do — I check Relay, Ascent, Switchboard. " +
-  "Ascent: what's on my plate, or add task buy milk to Groceries. " +
-  "Relay: message Shy I'll be late, then yes to send, or any new messages. " +
-  "Switchboard: what's new — next, snooze, dismiss, stop. Mute GitHub, or unmute GitHub. " +
-  "Longview: research electric cars, research status, what did you find. After a chime, ask what was that.";
+  "Brief me, or what should I do. What have you learned. " +
+  "Ascent: what's on my plate, add task buy milk to Groceries. " +
+  "Relay: message Shy I'll be late, yes to send. Any new messages. " +
+  "Switchboard: what's new, next, snooze, dismiss, stop. Mute GitHub, unmute GitHub. " +
+  "Longview: research electric cars, research status, what did you find. What was that.";

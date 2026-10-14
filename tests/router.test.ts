@@ -162,6 +162,7 @@ describe("router", () => {
       research_status: "research status",
       research_findings: "what did you find",
       suggest: "what should i do",
+      learned: "what have you learned",
     };
     for (const [intent, phrase] of Object.entries(coverage)) {
       expect(help, `help missing ${intent}`).toContain(phrase);

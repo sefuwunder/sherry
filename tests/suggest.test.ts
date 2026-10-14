@@ -82,3 +82,109 @@ describe("suggest analysis", () => {
     expect(out.length).toBe(0);
   });
 });
+
+describe("jev feedback loop", () => {
+  test("acting on a suggestion raises its kind weight", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const tmp = mkdtempSync(join(tmpdir(), "sherry-fb-"));
+    process.env.SHERRY_DATA = tmp;
+
+    const j = (d: any) => new Response(JSON.stringify(d), { headers: { "content-type": "application/json" } });
+    const mk = (routes: any) => {
+      const s = Bun.serve({
+        port: 0,
+        fetch(req) {
+          const u = new URL(req.url);
+          const fn = routes[`GET ${u.pathname}`] || routes[`POST ${u.pathname}`];
+          return fn ? fn(req) : new Response("nf", { status: 404 });
+        },
+      });
+      return { url: `http://127.0.0.1:${s.port}`, stop: () => s.stop() };
+    };
+    // 7 notifications from github -> noisy_channel suggestion with "mute github" action
+    const notifs = Array.from({ length: 7 }, (_, i) => ({
+      id: 100 + i, title: `CI ${i}`, body: "", channel_id: "github", priority: "normal", status: "new", created_at: 1000 + i,
+    }));
+    const sw = mk({
+      "GET /api/notifications": () => j({ notifications: notifs }),
+      "GET /api/channels": () => j({ channels: [{ id: "github", label: "GitHub" }] }),
+      "POST /api/channels/github/snooze": () => j({ channel: { id: "github" } }),
+    });
+    const relay = mk({ "GET /api/conversations": () => j({ conversations: [] }) });
+    const ascent = mk({ "GET /api/myday": () => j({ overdue: [], today: [], in_progress: [] }) });
+    process.env.SWITCHBOARD_URL = sw.url;
+    process.env.RELAY_URL = relay.url;
+    process.env.ASCENT_URL = ascent.url;
+
+    const { __resetDbForTests } = await import("../src/db");
+    const { __resetJevForTests, kindWeight } = await import("../src/jev");
+    const { __resetConversationForTests, handle } = await import("../src/app");
+    __resetDbForTests();
+    __resetJevForTests();
+    __resetConversationForTests();
+
+    const ask = async (text: string) => {
+      const r = await handle(new Request("http://x/api/ask", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      }));
+      return r.json() as Promise<any>;
+    };
+
+    // Baseline: no evidence yet
+    expect(kindWeight("noisy_channel")).toBe(0.5);
+
+    // Get suggestions -> offers noisy_channel, records shown
+    const s: any = await ask("what should I do");
+    expect(s.intent).toBe("suggest");
+    expect(s.speech).toMatch(/GitHub/);
+    expect(s.speech).toMatch(/mute github/);
+    // shown=1, acted=0 -> (0+1)/(1+2) = 1/3
+    expect(kindWeight("noisy_channel")).toBeCloseTo(1 / 3, 5);
+
+    // Act on it -> records acted
+    const m: any = await ask("mute github");
+    expect(m.intent).toBe("mute_channel");
+    // shown=1, acted=1 -> (1+1)/(1+2) = 2/3
+    expect(kindWeight("noisy_channel")).toBeCloseTo(2 / 3, 5);
+
+    sw.stop(); relay.stop(); ascent.stop();
+  });
+
+  test("learned intent reports patterns", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const tmp = mkdtempSync(join(tmpdir(), "sherry-fb2-"));
+    process.env.SHERRY_DATA = tmp;
+    const { __resetDbForTests } = await import("../src/db");
+    const { __resetJevForTests, recordShown, recordActed } = await import("../src/jev");
+    const { __resetConversationForTests, handle } = await import("../src/app");
+    __resetDbForTests();
+    __resetJevForTests();
+    __resetConversationForTests();
+
+    const ask = async (text: string) => {
+      const r = await handle(new Request("http://x/api/ask", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      }));
+      return r.json() as Promise<any>;
+    };
+
+    const d: any = await ask("what have you learned");
+    expect(d.intent).toBe("learned");
+    expect(d.speech).toMatch(/haven't learned/);
+
+    recordShown("waiting_reply");
+    recordShown("waiting_reply");
+    recordActed("waiting_reply");
+    recordActed("waiting_reply");
+    const d2: any = await ask("what have you learned");
+    expect(d2.speech).toMatch(/usually act/);
+  });
+});
