@@ -163,6 +163,7 @@ describe("router", () => {
       research_findings: "what did you find",
       suggest: "what should i do",
       learned: "what have you learned",
+      relationships: "relationship report",
     };
     for (const [intent, phrase] of Object.entries(coverage)) {
       expect(help, `help missing ${intent}`).toContain(phrase);

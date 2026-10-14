@@ -16,6 +16,7 @@ export const SUGGEST_KINDS = [
   "noisy_channel",
   "heavy_day",
   "pile_up",
+  "neglected_contact",
 ] as const;
 export type SuggestKind = (typeof SUGGEST_KINDS)[number];
 
@@ -97,6 +98,7 @@ export function learnedSpeech(): string {
     noisy_channel: "quieting noisy channels",
     heavy_day: "heavy-day warnings",
     pile_up: "project pile-up alerts",
+    neglected_contact: "reaching out to quiet contacts",
   };
   const bits: string[] = [];
   if (top.shown >= 2) {

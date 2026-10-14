@@ -18,6 +18,7 @@ export interface Suggestion {
 interface RelayConv {
   id: string; title: string; unread?: number;
   last_direction?: string; last_at?: string; last_body?: string;
+  is_group?: boolean;
 }
 
 interface AscentTask {
@@ -45,7 +46,7 @@ function taskTitle(t: AscentTask): string {
   return String(t.title || t.name || "untitled").slice(0, 80);
 }
 
-/** Analyze Relay conversations: unanswered inbound, stale threads. */
+/** Analyze Relay conversations: unanswered inbound, stale threads, neglected contacts. */
 export function analyzeRelay(convs: RelayConv[]): Suggestion[] {
   const out: Suggestion[] = [];
   for (const c of convs) {
@@ -61,6 +62,18 @@ export function analyzeRelay(convs: RelayConv[]): Suggestion[] {
         priority: 2,
         text: `${c.title} has been waiting ${when} for a reply${unread > 1 ? ` (${unread} unread)` : ""}`,
         action: `say "message ${c.title.toLowerCase()} ..." to reply`,
+        match: { type: "message", contact: c.title.toLowerCase() },
+      });
+    }
+    // Neglected: no contact in 14+ days (lightweight, from last_at alone).
+    // Skip groups and conversations that never had real exchange.
+    const ageD = ageH / 24;
+    if (!c.is_group && ageD >= 14 && ageD < 365) {
+      out.push({
+        kind: "neglected_contact",
+        priority: 8,
+        text: `You haven't talked to ${c.title} in ${Math.round(ageD)} days`,
+        action: `say "message ${c.title.toLowerCase()} ..." to check in`,
         match: { type: "message", contact: c.title.toLowerCase() },
       });
     }

@@ -188,3 +188,20 @@ describe("jev feedback loop", () => {
     expect(d2.speech).toMatch(/usually act/);
   });
 });
+
+describe("neglected contacts", () => {
+  test("analyzeRelay flags 14+ day silence", async () => {
+    const { analyzeRelay } = await import("../src/suggest");
+    const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    const recent = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const out = analyzeRelay([
+      { id: "1", title: "Dany", last_at: old, last_direction: "out", is_group: false },
+      { id: "2", title: "Shy", last_at: recent, last_direction: "out", is_group: false },
+      { id: "3", title: "Team", last_at: old, last_direction: "out", is_group: true },
+    ]);
+    const neglected = out.filter((s) => s.kind === "neglected_contact");
+    expect(neglected.length).toBe(1);
+    expect(neglected[0].text).toContain("Dany");
+    expect(neglected[0].text).toContain("20 days");
+  });
+});

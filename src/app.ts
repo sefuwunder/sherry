@@ -20,6 +20,7 @@ import {
 } from "./live";
 import { route, splitCompound, HELP_SPEECH, type Route } from "./router";
 import { analyze } from "./suggest";
+import { analyzeRelationships } from "./relationships";
 import { recordActed, learnedSpeech } from "./jev";
 import {
   integrationStatus, composeBrief, myDay, addTask,
@@ -325,6 +326,10 @@ async function actSingle(r: Route): Promise<ActionResult> {
     }
     case "learned": {
       return { speech: learnedSpeech() };
+    }
+    case "relationships": {
+      const { speech } = await analyzeRelationships();
+      return { speech };
     }
     case "myday": {
       const { speech } = await myDay();

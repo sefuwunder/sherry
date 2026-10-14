@@ -351,16 +351,16 @@ export interface DigestResult {
 
 /** Items for the spoken triage digest. Respects channel routing (muted /
  *  disabled / snoozed channels are excluded) and quiet hours (urgent-only
- *  when urgent breaks through; empty otherwise). */
-export async function digestItems(): Promise<DigestResult> {
+ *  when urgent breaks through; empty otherwise). `now` is injectable so
+ *  tests don't flake on the machine's time of day. */
+export async function digestItems(now = Date.now()): Promise<DigestResult> {
   const b = bases();
   const [chR, qR, nR] = await Promise.all([
     getChannels(),
-    getQuietState(),
+    getQuietState(now),
     get(b.switchboard, "/api/notifications?limit=10"),
   ]);
   if (!nR.ok) return { ok: false, items: [], quietHours: false, error: "I can't reach Switchboard. Is it running?" };
-  const now = Date.now();
   const labels = new Map<string, string>();
   const hidden = new Set<string>();
   if (chR.ok) {
